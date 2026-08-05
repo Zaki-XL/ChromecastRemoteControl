@@ -1390,7 +1390,7 @@ async def main(page: ft.Page) -> None:
                     sc = getattr(cast_client.cast, "socket_client", None)
                     if sc and hasattr(sc, "is_connected"):
                         try:
-                            is_cast_connected = sc.is_connected()
+                            is_cast_connected = sc.is_connected
                         except Exception:
                             pass
                 
@@ -1412,11 +1412,14 @@ async def main(page: ft.Page) -> None:
             try:
                 if cast_client and cast_client.cast:
                     sc = getattr(cast_client.cast, "socket_client", None)
-                    if sc and hasattr(sc, "is_connected") and sc.is_connected():
+                    if sc and hasattr(sc, "is_connected") and sc.is_connected:
                         mc = getattr(cast_client.cast, "media_controller", None)
                         if mc and hasattr(mc, "update_status"):
-                            # メインUIスレッドをブロックしないよう to_thread で呼び出し
-                            await asyncio.to_thread(mc.update_status)
+                            # メインUIスレッドをブロックしないよう to_thread で呼び出し、かつタイムアウト保護 (2.0秒) を適用
+                            try:
+                                await asyncio.wait_for(asyncio.to_thread(mc.update_status), timeout=2.0)
+                            except asyncio.TimeoutError:
+                                logger.warning("[MEDIA_POLL] update_status がタイムアウトしました。ソケットがハングしている可能性があります。")
             except Exception as ex:
                 logger.debug(f"[MEDIA_POLL] ステータス要求例外 (無視可): {ex}")
 

@@ -69,10 +69,10 @@ class ChromecastCastClient:
         self.loop = loop
 
     def connect(self, force: bool = False) -> None:
-        # 既に同じIPに正常にソケット接続されている場合は重複接続を避けて既存의 接続を維持（force=True時はバイパス）
+        # 既に同じIPに正常にソケット接続されている場合は重複接続を避けて既存の接続を維持（force=True時はバイパス）
         if not force and self.cast and self.ip:
             sc = getattr(self.cast, "socket_client", None)
-            if sc and hasattr(sc, "is_connected") and sc.is_connected():
+            if sc and hasattr(sc, "is_connected") and sc.is_connected:
                 host_ip = getattr(self.cast.cast_info, 'host', None) if hasattr(self.cast, 'cast_info') else None
                 if host_ip == self.ip:
                     logger.info(f"既に Chromecast ({self.ip}) に接続されています。既存の接続を維持します。")
@@ -112,7 +112,7 @@ class ChromecastCastClient:
             
             # ソケットの生存状態を厳格チェック
             sc = getattr(self.cast, "socket_client", None)
-            if not (sc and hasattr(sc, "is_connected") and sc.is_connected()):
+            if not (sc and hasattr(sc, "is_connected") and sc.is_connected):
                 raise RuntimeError(f"Chromecast ソケット接続が失敗しました: IP={self.ip}")
 
             logger.info(f"Chromecast 接続完了: {self.cast.name} ({self.cast.model_name})")
