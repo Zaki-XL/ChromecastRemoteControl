@@ -1,0 +1,7 @@
+flet[desktop]>=0.23.0
+flet-desktop>=0.23.0
+androidtvremote2>=0.0.14
+pychromecast>=14.0.0
+zeroconf>=0.132.0
+cryptography>=42.0.0
+pyinstaller>=6.5.0
