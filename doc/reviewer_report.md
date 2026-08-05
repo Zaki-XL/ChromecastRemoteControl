@@ -1,41 +1,30 @@
-# 検証結果レビュー報告書 (Reviewer Report)
+# レビュー報告書 (Reviewer Report)
 
-本報告書は、`main.py` および `cast_client.py` における TypeError バグおよびブロッキングハングアップバグの修正内容に対し、静的・論理的観点からコードレビューおよびセキュリティ監査を実施した結果を記録するものです。
+## 監査対象
+- `main.py`
+- `cast_client.py`
+- 監査項目:
+  1. `is_connected()` から `is_connected` への修正
+  2. `media_status_poll_loop` への 2.0秒タイムアウト保護追加
 
----
+## 監査結果
 
-## 1. 監査対象の変更内容
+### 1. `is_connected()` から `is_connected` への修正
+- **`cast_client.py`**:
+  - `connect()` メソッド内の2箇所（L75付近, L115付近）で、`sc.is_connected()` がプロパティアクセス `sc.is_connected` に正しく修正されていることを確認しました。
+- **`main.py`**:
+  - `connection_monitor_loop()` (L1393付近) および `media_status_poll_loop()` (L1415付近) では `sc.is_connected` として正しく修正されています。
+  - `start_cast_connection()` 関数内 (L641付近) に残存していた関数呼び出しの `()` も、再監査にて `sc.is_connected` に正しく修正されたことを確認しました。
 
-### ① `is_connected` 呼び出しミス（TypeError）の修正
-- **発生原因**: `pychromecast` の `SocketClient.is_connected` 属性（bool値）を関数として `is_connected()` 呼び出ししていたため、`TypeError: 'bool' object is not callable` が発生し、接続処理と定期ポーリングが即座にクラッシュ・スキップされていました。
-- **修正内容**: 
-  - `cast_client.py` の 75行目および115行目のかっこ `()` を除去し、正しいプロパティ参照 `sc.is_connected` に修正。
-  - `main.py` の 1393行目および1415行目のかっこ `()` を除去し、`sc.is_connected` に修正。
-- **評価**: `is_connected` の型定義と合致しており、TypeError の発生要因が完全に排除されたことを確認。
+### 2. `media_status_poll_loop` への 2.0秒タイムアウト保護追加
+- **`main.py`**:
+  - L1420 付近にて、以下のように2.0秒のタイムアウト保護が追加されていることを確認しました。
+    ```python
+    await asyncio.wait_for(asyncio.to_thread(mc.update_status), timeout=2.0)
+    ```
+  - メインスレッドをブロックしないための `asyncio.to_thread` による別スレッド呼び出しと、ソケットハングアップ対策としての `TimeoutError` のハンドリングが正しく実装されています。
 
-### ② `update_status` 同期ブロッキングによるハングアップ対策
-- **発生原因**: ネットワーク切断や休止復旧後の不安定な状態で `media_controller.update_status()` 同期通信を呼び出すと、スレッドが永久ブロックし、呼び出し元の asyncio コルーチンを道連れにしてハングアップさせていました。
-- **修正内容**:
-  - `main.py` の定期ポーリングループ（L1415〜1420）にて、`asyncio.wait_for` による **2.0秒のタイムアウト保護** を適用。タイムアウト発生時は `asyncio.TimeoutError` を安全にキャッチして次のループに逃がすように変更。
-  - `cast_client.py` の接続初期化 `connect()` メソッドの最後で実行していた同期的な `update_status()` 呼び出しを廃止（メモリキャッシュのステータス反映のみに変更）。
-- **評価**: ネットワーク遅延やスレッドの永久サスペンドに対する強固な防衛ラインが構築されたことを確認。
+## 結論
+すべての指摘事項が正しく修正されたことを確認しました。本変更内容はシステムの堅牢性向上に寄与するものであり、問題なく承認（APPROVED）いたします。
 
----
-
-## 2. 品質・安全ガードレール監査
-
-| ガードレール項目 | 監査結果 | 判定 | 備考 |
-| :--- | :--- | :--- | :--- |
-| **00-global.md (スキャン範囲)** | 適合 | **PASS** | 外部スキャン等による機密流出なし。 |
-| **01-file_set.md (Git/コミット管理)** | 適合 | **PASS** | プロジェクトルートへの不要ファイル配置なし。新ルールに沿った Git コミット実施済み。 |
-| **02-ExecCommand.md (コマンド実行)** | 適合 | **PASS** | `temp_run.ps1` を経由した監査クリア後の実行を徹底。 |
-| **04-logging.md (ログ制限)** | 適合 | **PASS** | 10MB・3世代の `RotatingFileHandler` ログローテーション適用済み。 |
-| **05-testing.md (テスト品質)** | 適合 | **PASS** | モックによる都合の良い検証を排除し、本番コードの TypeError を実ログから追跡。 |
-
----
-
-## 3. レビュー結論
-
-**判定**: **APPROVED (承認)**
-
-本修正案は、接続の安定性とメディア同期機能を復旧させるために必要十分かつ安全な変更であり、プログラム全体の型整合性および例外処理設計に準拠しています。本マージおよびリリース（ビルド成果物の配備）を正式に承認します。
+**Status:** APPROVED
