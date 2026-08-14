@@ -977,7 +977,36 @@ async def main(page: ft.Page) -> None:
         max_lines=1
     )
 
-    progress_bar = ft.ProgressBar(value=0, color="#8A2BE2", bgcolor="#2C2C35", height=4)
+    current_duration: float = 0.0
+    is_slider_dragging: bool = False
+
+    def on_slider_change(e):
+        nonlocal is_slider_dragging
+        is_slider_dragging = True
+        current_val = e.control.value
+        progress_text.value = f"{format_time(current_val)} / {format_time(current_duration)} (Seeking...)"
+        page.update()
+
+    def on_slider_change_end(e):
+        nonlocal is_slider_dragging, last_user_seek_time
+        target_val = e.control.value
+        if cast_client:
+            cast_client.seek(target_val)
+        is_slider_dragging = False
+        last_user_seek_time = time.time()
+        progress_text.value = f"{format_time(target_val)} / {format_time(current_duration)}"
+        page.update()
+
+    progress_bar = ft.Slider(
+        value=0.0,
+        min=0.0,
+        max=100.0,
+        on_change=on_slider_change,
+        on_change_end=on_slider_change_end,
+        disabled=True,
+        active_color="#8A2BE2",
+        inactive_color="#2C2C35",
+    )
     progress_text = ft.Text("0:00 / 0:00", size=9, color="#80ffffff")
 
     def format_time(seconds: float | None) -> str:
@@ -993,16 +1022,15 @@ async def main(page: ft.Page) -> None:
         subtitle_enabled_state = not subtitle_enabled_state
         
         # 1. Android TV Remote 経由で KEYCODE_CAPTIONS (175) を送信
-        if remote_client and remote_client.is_connected:
-            asyncio.create_task(remote_client.send_key("CAPTIONS", "SHORT"))
-            
-        # 2. CastClient 経由でのプロトコル送信も併用
-        if cast_client and cast_client.cast:
-            cast_client.toggle_subtitles(subtitle_enabled_state, config.preferred_language)
+        send_key(175)
+        
+        # 2. Chromecast CastClient 経由で字幕の表示状態をトグル切り替え (状態同期)
+        if cast_client:
+            actual_sub_state = cast_client.toggle_subtitles(enable=subtitle_enabled_state, language=config.preferred_language)
+            subtitle_enabled_state = actual_sub_state
             
         subtitle_btn.bgcolor = "#8A2BE2" if subtitle_enabled_state else "#1C1C24"
         subtitle_btn.border = get_border_all(2 if subtitle_enabled_state else 1, "#00D2FF" if subtitle_enabled_state else "#33ffffff")
-        show_info(f"字幕切り替え (CC) 命令を送信しました")
         page.update()
 
     subtitle_btn = ft.Container(
@@ -1020,6 +1048,7 @@ async def main(page: ft.Page) -> None:
         logger.info(f"[UI_STATUS_RECEIVE] メディアステータス受信: Title={status_info.get('title')}, State={status_info.get('player_state')}")
         def update_ui():
             try:
+                nonlocal current_duration
                 title = status_info.get("title") or "Media Stopped"
                 artist = status_info.get("artist") or status_info.get("album_name") or "Device Connected"
                 album_art = status_info.get("album_art") or status_info.get("images")
@@ -1035,16 +1064,30 @@ async def main(page: ft.Page) -> None:
                 duration = status_info.get("duration")
                 current_time = status_info.get("current_time")
                 
-                # 直近 2.5 秒以内にユーザーがシーク操作を行った場合はステータス受領による巻き戻り表示をガード
-                if time.time() - last_user_seek_time > 2.5:
-                    if duration and duration > 0 and current_time is not None:
-                        progress_bar.value = min(1.0, max(0.0, current_time / duration))
-                        progress_text.value = f"{format_time(current_time)} / {format_time(duration)}"
-                    else:
-                        progress_bar.value = 0
-                        progress_text.value = "0:00 / 0:00"
-
+                if duration and duration > 0:
+                    current_duration = float(duration)
+                
                 player_state = status_info.get("player_state")
+                is_media_stopped = player_state in ("IDLE", "STOPPED", "UNKNOWN") or title == "Media Stopped"
+
+                if is_media_stopped:
+                    progress_bar.disabled = True
+                    progress_bar.value = 0.0
+                    progress_bar.max = 100.0
+                    progress_text.value = "0:00 / 0:00"
+                else:
+                    progress_bar.disabled = False
+                    # ユーザーが操作（ドラッグ）中でなく、かつ直近2.5秒以内にリモコンキーでのシークをしていない場合のみ、実機状態と同期
+                    if not is_slider_dragging and time.time() - last_user_seek_time > 2.5:
+                        if duration and duration > 0 and current_time is not None:
+                            progress_bar.max = float(duration)
+                            progress_bar.value = min(float(duration), max(0.0, float(current_time)))
+                            progress_text.value = f"{format_time(current_time)} / {format_time(duration)}"
+                        else:
+                            progress_bar.value = 0.0
+                            progress_bar.max = 100.0
+                            progress_text.value = "0:00 / 0:00"
+
                 if player_state == "PLAYING":
                     cast_play.content.value = "⏸"
                 else:

@@ -315,6 +315,14 @@ class ChromecastCastClient:
             logger.error(f"相対シーク実行エラー: {ex}")
         return None
 
+    def seek(self, target_seconds: float) -> None:
+        """指定された絶対再生位置（秒）へのシークを安全に実行します。"""
+        try:
+            if self.cast and self.cast.media_controller:
+                logger.info(f"キャスト絶対シーク送信: target={target_seconds:.1f}s")
+                self._run_in_thread(self.cast.media_controller.seek, target_seconds)
+        except Exception as ex:
+            logger.error(f"絶対シーク実行エラー: {ex}")
 
     def apply_preferred_language(self, language_code: str) -> None:
         """優先言語の設定に従い、字幕またはトラックを適用します。"""
