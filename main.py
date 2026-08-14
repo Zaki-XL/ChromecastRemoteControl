@@ -1451,24 +1451,47 @@ async def main(page: ft.Page) -> None:
                         
                     asyncio.create_task(connect_to_device(config.last_device_id, config.last_device_ip))
 
+    is_poll_running = False
+
     async def media_status_poll_loop():
-        """Chromecast 接続中、定期的に (3秒ごと) メディアステータスの更新要求を送り、メディア情報を画面へリアルタイム同期します。"""
+        """Chromecast 接続中、定期的にメディアステータスの更新要求を送ります。"""
+        nonlocal is_poll_running
         logger.info("[MEDIA_POLL] メディアステータス定期同期タスクを開始しました。")
         while True:
-            await asyncio.sleep(3)
+            # 再生状態に応じてポーリング間隔を動的に切り替え
+            # キャスト再生中以外はテレビへの通信負荷を減らすため15秒間隔にする
+            player_state = "UNKNOWN"
+            if cast_client and cast_client.cast and cast_client.cast.media_controller:
+                try:
+                    status = cast_client.cast.media_controller.status
+                    if status:
+                        player_state = status.player_state
+                except Exception:
+                    pass
+
+            sleep_seconds = 3 if player_state in ("PLAYING", "PAUSED", "BUFFERING") else 15
+            await asyncio.sleep(sleep_seconds)
+
+            if is_poll_running:
+                logger.debug("[MEDIA_POLL] 前回の更新要求スレッドがまだ実行中のため、今回のポーリングをスキップします。")
+                continue
+
             try:
                 if cast_client and cast_client.cast:
                     sc = getattr(cast_client.cast, "socket_client", None)
                     if sc and hasattr(sc, "is_connected") and sc.is_connected:
                         mc = getattr(cast_client.cast, "media_controller", None)
                         if mc and hasattr(mc, "update_status"):
-                            # メインUIスレッドをブロックしないよう to_thread で呼び出し、かつタイムアウト保護 (2.0秒) を適用
+                            is_poll_running = True
                             try:
                                 await asyncio.wait_for(asyncio.to_thread(mc.update_status), timeout=2.0)
                             except asyncio.TimeoutError:
-                                logger.warning("[MEDIA_POLL] update_status がタイムアウトしました。ソケットがハングしている可能性があります。")
+                                logger.warning("[MEDIA_POLL] update_status がタイムアウトしました。スレッド未完了の可能性があります。")
+                            finally:
+                                is_poll_running = False
             except Exception as ex:
-                logger.debug(f"[MEDIA_POLL] ステータス要求例外 (無視可): {ex}")
+                is_poll_running = False
+                logger.debug(f"[MEDIA_POLL] ステータス要求例外: {ex}")
 
     asyncio.create_task(monitor_system_resume())
     asyncio.create_task(connection_monitor_loop())
