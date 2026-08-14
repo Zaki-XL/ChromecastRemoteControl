@@ -491,13 +491,17 @@ async def main(page: ft.Page) -> None:
     )
 
     header_drag_area = ft.WindowDragArea(
-        content=ft.Row(
-            [
-                ft.Text("📺", size=FS(13)),
-                header_title
-            ],
-            spacing=6,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER
+        content=ft.Container(
+            content=ft.Row(
+                [
+                    ft.Text("📺", size=FS(13)),
+                    header_title
+                ],
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER
+            ),
+            bgcolor="transparent",
+            expand=True
         ),
         expand=True
     )
