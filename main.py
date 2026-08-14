@@ -638,7 +638,7 @@ async def main(page: ft.Page) -> None:
                 
                 # Castソケットの本当の接続状態を判定
                 sc = getattr(cast_client.cast, "socket_client", None) if cast_client.cast else None
-                is_connected = sc and hasattr(sc, "is_connected") and sc.is_connected()
+                is_connected = sc and hasattr(sc, "is_connected") and sc.is_connected
                 
                 if is_connected:
                     logger.info("Cast client connected successfully.")
