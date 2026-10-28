@@ -59,7 +59,31 @@ graph TD
 
 ---
 
-## Setup & Installation
+## Quick Start / Download (Recommended)
+
+Pre-built standalone Windows executables (EXE) are provided so you can run the app without installing Python.
+
+1. **Download ZIP**:  
+   Download the latest `GoogleTVRemote_vX.X.X_win64.zip` from [GitHub Releases](https://github.com/Zaki-XL/ChromecastRemoteControl/releases).
+2. **Extract**:  
+   Extract (unzip) the archive to any folder of your choice (e.g., in Documents or Desktop).
+3. **Launch**:  
+   Double-click `GoogleTVRemote.exe` inside the extracted folder to run the application immediately.
+
+---
+
+## Uninstallation
+
+This application is designed as a completely **portable** application. It does not touch your Windows registry or create files in system directories (such as AppData).
+
+- All runtime files, including the configuration (`config.ini`) and SSL pairing certificates (`certs/`), are kept **within the application folder**.
+- To uninstall, simply **delete the extracted folder**. No residual files or registry keys will remain on your computer.
+
+---
+
+## Setup & Run from Source (Developers)
+
+If you prefer to run or build the application from source code using Python:
 
 ### 1. Clone the repository
 ```bash
