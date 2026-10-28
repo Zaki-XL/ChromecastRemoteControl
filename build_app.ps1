@@ -37,8 +37,18 @@ if (Test-Path "GoogleTVRemote.spec") {
     Remove-Item -Force "GoogleTVRemote.spec"
 }
 
+# --- ガードレール 1: ビルド前自動テスト (構文・属性解決・UI完全初期化) ---
+Write-Host "`n[TEST GATE] Running Pre-Build Automated Tests..." -ForegroundColor Yellow
+python run_tests.py --pre-build
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "`n========================================" -ForegroundColor Red
+    Write-Host "Error: Pre-build test failed! Packaging aborted." -ForegroundColor Red
+    Write-Host "========================================" -ForegroundColor Red
+    exit 1
+}
+
 # Run PyInstaller build
-Write-Host "Starting PyInstaller single-file packaging..." -ForegroundColor Cyan
+Write-Host "`nStarting PyInstaller single-file packaging..." -ForegroundColor Cyan
 if ($runCmd -eq "pyinstaller") {
     pyinstaller --clean --onefile --noconsole --name="GoogleTVRemote" main.py
 } else {
@@ -59,8 +69,18 @@ if ($buildExitCode -eq 0 -and (Test-Path $exePath)) {
     $rootExePath = Join-Path $scriptDir "GoogleTVRemote.exe"
     Copy-Item -Path $exePath -Destination $rootExePath -Force
     
+    # --- ガードレール 2: ビルド後自動テスト (EXE起動 & ログエラーゼロ検査) ---
+    Write-Host "`n[TEST GATE] Running Post-Build EXE & Log Error Verification..." -ForegroundColor Yellow
+    python run_tests.py --post-build
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "`n========================================" -ForegroundColor Red
+        Write-Host "Error: Post-build EXE verification failed! Application has runtime errors." -ForegroundColor Red
+        Write-Host "========================================" -ForegroundColor Red
+        exit 1
+    }
+
     Write-Host "`n========================================" -ForegroundColor Green
-    Write-Host "Build successful!" -ForegroundColor Green
+    Write-Host "Build & Verification successful!" -ForegroundColor Green
     Write-Host "Executable: $exePath" -ForegroundColor Green
     Write-Host "Copied to: $rootExePath" -ForegroundColor Green
     Write-Host "Size: $sizeMb MB" -ForegroundColor Green

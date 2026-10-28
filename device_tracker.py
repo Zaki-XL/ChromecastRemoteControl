@@ -79,20 +79,20 @@ class AndroidTVTracker(ServiceListener):
         with self.lock:
             return list(self.devices.values())
 
-    def add_service(self, zc: Zeroconf, type_: str, name: str) -> None:
-        """Zeroconfで新しいサービスが追加されたときに呼び出されます。"""
-        logger.debug(f"Service added: {name}")
-        # 非同期での名前解決を確実にするため、get_service_info を呼び出します
+    def _handle_service_event(self, zc: Zeroconf, type_: str, name: str, event_type: str) -> None:
+        """サービスの追加・更新イベントを共通処理します。"""
+        logger.debug(f"Service {event_type}: {name}")
         info = zc.get_service_info(type_, name)
         if info:
             self._process_service_info(name, info)
 
+    def add_service(self, zc: Zeroconf, type_: str, name: str) -> None:
+        """Zeroconfで新しいサービスが追加されたときに呼び出されます。"""
+        self._handle_service_event(zc, type_, name, "added")
+
     def update_service(self, zc: Zeroconf, type_: str, name: str) -> None:
         """Zeroconfで既存のサービス情報が更新されたときに呼び出されます。"""
-        logger.debug(f"Service updated: {name}")
-        info = zc.get_service_info(type_, name)
-        if info:
-            self._process_service_info(name, info)
+        self._handle_service_event(zc, type_, name, "updated")
 
     def remove_service(self, zc: Zeroconf, type_: str, name: str) -> None:
         """Zeroconfでサービスが削除（オフライン）されたときに呼び出されます。"""

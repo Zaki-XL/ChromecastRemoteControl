@@ -1,4 +1,5 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import logging
 import threading
 from typing import Any, Callable, Dict, Optional
@@ -54,12 +55,19 @@ class ChromecastCastClient:
         self.on_status_changed = on_status_changed
         self.cast: Optional[pychromecast.Chromecast] = None
         self.listener: Optional[ChromecastMediaListener] = None
+        self._executor: Optional[ThreadPoolExecutor] = None
         
         # UI更新用のイベントループをキャプチャします
         try:
             self.loop = loop or asyncio.get_running_loop()
         except RuntimeError:
             self.loop = None
+
+    def _get_executor(self) -> ThreadPoolExecutor:
+        """コマンド送信用のシングルワーカースレッドプールを取得（未初期化なら初期化）します。"""
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="CastWorker")
+        return self._executor
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """非同期コールバック実行に使用するイベントループを設定します。
@@ -180,64 +188,77 @@ class ChromecastCastClient:
             finally:
                 self.cast = None
                 self.listener = None
+                if self._executor:
+                    try:
+                        self._executor.shutdown(wait=False, cancel_futures=True)
+                    except Exception:
+                        pass
+                    self._executor = None
 
     def play(self) -> None:
-        """メディアの再生を開始します。"""
+        """メディアの再生を開始します（非ブロッキングワーカースレッド実行）。"""
         if self.cast and self.cast.media_controller:
-            self.cast.media_controller.play()
+            self._run_in_thread(self.cast.media_controller.play)
 
     def pause(self) -> None:
-        """メディアの再生を一時停止します。"""
+        """メディアの再生を一時停止します（非ブロッキングワーカースレッド実行）。"""
         if self.cast and self.cast.media_controller:
-            self.cast.media_controller.pause()
+            self._run_in_thread(self.cast.media_controller.pause)
 
     def toggle_play_pause(self) -> None:
-        """メディアの再生・一時停止をトグル切り替えします。"""
-        if self.cast and self.cast.media_controller:
-            status = self.cast.media_controller.status
-            if status and status.player_state == "PLAYING":
-                self.cast.media_controller.pause()
-            else:
-                self.cast.media_controller.play()
+        """メディアの再生・一時停止をトグル切り替えします（非ブロッキングワーカースレッド実行）。"""
+        def _toggle():
+            if self.cast and self.cast.media_controller:
+                status = self.cast.media_controller.status
+                if status and status.player_state == "PLAYING":
+                    self.cast.media_controller.pause()
+                else:
+                    self.cast.media_controller.play()
+        self._run_in_thread(_toggle)
 
     def prev(self) -> None:
-        """前のトラックへ戻る（または巻き戻し）コマンドを送信します。"""
+        """前のトラックへ戻る（または巻き戻し）コマンドを送信します（非ブロッキングワーカースレッド実行）。"""
         if self.cast and self.cast.media_controller:
-            self.cast.media_controller.rewind()
+            self._run_in_thread(self.cast.media_controller.rewind)
 
     def next(self) -> None:
-        """次のトラックへ進む（スキップ）コマンドを送信します。"""
+        """次のトラックへ進む（スキップ）コマンドを送信します（非ブロッキングワーカースレッド実行）。"""
         if self.cast and self.cast.media_controller:
-            self.cast.media_controller.skip()
+            self._run_in_thread(self.cast.media_controller.skip)
 
     def volume_up(self) -> None:
-        """端末全体のボリュームを上げます。"""
+        """端末全体のボリュームを上げます（非ブロッキングワーカースレッド実行）。"""
         if self.cast:
-            self.cast.volume_up()
+            self._run_in_thread(self.cast.volume_up)
 
     def volume_down(self) -> None:
-        """端末全体のボリュームを下げます。"""
+        """端末全体のボリュームを下げます（非ブロッキングワーカースレッド実行）。"""
         if self.cast:
-            self.cast.volume_down()
+            self._run_in_thread(self.cast.volume_down)
 
     def mute(self, status: bool) -> None:
-        """端末全体の消音（ミュート）状態を設定します。
+        """端末全体の消音（ミュート）状態を設定します（非ブロッキングワーカースレッド実行）。
         
         Args:
             status: True でミュートON、False でミュート解除。
         """
         if self.cast:
-            self.cast.set_volume_muted(status)
+            self._run_in_thread(self.cast.set_volume_muted, status)
 
     def _run_in_thread(self, func: Callable, *args: Any, **kwargs: Any) -> None:
-        """pychromecastのWaitResponse等によるブロッキングを回避するため、安全に別スレッドで実行します。"""
+        """pychromecastのWaitResponse等によるブロッキングを回避するため、単一ワーカースレッドで順序保証実行します。"""
         def worker():
             try:
                 func(*args, **kwargs)
             except Exception as ex:
                 logger.error(f"Cast command execution error ({func.__name__}): {ex}")
 
-        threading.Thread(target=worker, daemon=True).start()
+        try:
+            self._get_executor().submit(worker)
+        except RuntimeError:
+            # executor が shutdown 済みの場合は再生成して投入
+            self._executor = None
+            self._get_executor().submit(worker)
 
 
 
@@ -256,6 +277,12 @@ class ChromecastCastClient:
 
         mc = self.cast.media_controller
         status = mc.status
+
+        # メディア再生セッションが存在しない場合、Default Media Receiverの不要な起動ループを防ぐためスキップ
+        if not status or not getattr(status, 'media_session_id', None) or status.player_state not in ("PLAYING", "PAUSED", "BUFFERING"):
+            logger.debug("有効なメディア再生セッションが存在しないため、字幕設定コマンドの送信をスキップします。")
+            return False
+
         active_ids = getattr(status, 'current_subtitle_tracks', []) or getattr(status, 'active_track_ids', []) or []
         is_active = bool(active_ids)
         target_state = (not is_active) if enable is None else enable
@@ -328,7 +355,13 @@ class ChromecastCastClient:
         """優先言語の設定に従い、字幕またはトラックを適用します。"""
         if not language_code or language_code.lower() in ("off", "none", "auto"):
             return
-        logger.info(f"キャスト開始時の優先言語を適用します: {language_code}")
+        if not (self.cast and self.cast.media_controller):
+            return
+        status = self.cast.media_controller.status
+        if not status or not getattr(status, 'media_session_id', None) or status.player_state not in ("PLAYING", "PAUSED", "BUFFERING"):
+            logger.debug(f"メディア未再生のため優先言語の自動適用をスキップします: {language_code}")
+            return
+        logger.info(f"メディア再生中の優先言語を適用します: {language_code}")
         self.toggle_subtitles(enable=True, language=language_code)
 
     def stop(self) -> None:

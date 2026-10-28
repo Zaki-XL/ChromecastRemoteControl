@@ -1,25 +1,32 @@
-# Python キャッシュ
+# ==========================================
+# 原則全除外（ホワイトリスト型）
+# ==========================================
+/*
+
+# ------------------------------------------
+# 明示的に許可する公開ファイル・ディレクトリ
+# ------------------------------------------
+!/.gitignore
+!/LICENSE
+!/README.md
+!/README_EN.md
+!/requirements.txt
+!/build.bat
+!/build_app.ps1
+!/GoogleTVRemote.spec
+!/config.example.ini
+
+# Python ソースコード
+!/*.py
+
+# アセット・リソース（存在する場合）
+!/assets/
+!/assets/**
+
+# ------------------------------------------
+# 例外許可されたディレクトリ配下の除外
+# ------------------------------------------
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-.pytest_cache/
-.venv/
-venv/
-
-# PyInstaller / ビルド成果物
-build/
-dist/
-*.spec
-GoogleTVRemote.exe
-
-# アプリケーションログファイル
+*.py[cod]
+*$py.class
 *.log
-log/
-
-# 一時検証用スクリプト (scratchフォルダ配下の一時バッチ等)
-scratch/temp_run.ps1
-scratch/read_logs.py
-scratch/write_rule.py
-scratch/read_logs.pyc
-approved_commands.json

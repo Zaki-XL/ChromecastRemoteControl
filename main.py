@@ -4,7 +4,7 @@ import threading
 import time
 import socket
 import sys
-import subprocess
+import unicodedata
 from typing import Any, Dict
 
 import flet as ft
@@ -29,61 +29,16 @@ def prevent_multiple_instances(port: int = 64660):
         logger.warning("GoogleTVRemote is already running. Exiting...")
         sys.exit(0)
 
-# ログの設定 (ファイルとコンソールの両方に出力。サイズ制限付きローテーションを実装)
+# ログの設定 (メモリバッファリング + ローテーションファイルハンドラ + コンソール出力)
 import os
-from logging.handlers import RotatingFileHandler
+import atexit
+from logging.handlers import RotatingFileHandler, MemoryHandler
 
 def get_app_dir() -> str:
     """PyInstallerでexe化されている場合も、実行ファイルのあるフォルダパスを正しく取得します。"""
     if getattr(sys, 'frozen', False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
-
-log_file_path = os.path.join(get_app_dir(), "app_debug.log")
-log_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s (%(threadName)s): %(message)s")
-
-# RotatingFileHandler を使用し、最大10MB・3世代でローテーション (65GB肥大化防止のガードレール)
-file_handler = RotatingFileHandler(
-    log_file_path,
-    maxBytes=10 * 1024 * 1024,
-    backupCount=3,
-    encoding="utf-8"
-)
-file_handler.setFormatter(log_formatter)
-file_handler.setLevel(logging.DEBUG)
-
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(log_formatter)
-console_handler.setLevel(logging.INFO)
-
-root_logger = logging.getLogger()
-root_logger.setLevel(logging.DEBUG)
-# 重複ハンドラ防止
-root_logger.handlers = [file_handler, console_handler]
-
-# サードパーティライブラリのDEBUGログを抑制し、無制限の書き込みを防止する
-logging.getLogger("pychromecast").setLevel(logging.INFO)
-logging.getLogger("zeroconf").setLevel(logging.INFO)
-logging.getLogger("androidtvremote2").setLevel(logging.INFO)
-logging.getLogger("flet").setLevel(logging.INFO)
-logging.getLogger("flet_core").setLevel(logging.INFO)
-
-logger = logging.getLogger(__name__)
-logger.info(f"=== Debug logging initialized -> {log_file_path} (Max 10MB x 3 backup rotation enabled) ===")
-
-def force_exit_app() -> None:
-    """OSレベルで即時かつ確実にアプリを完全終了させます。"""
-    logger.info("[SHUTDOWN] App termination ordered. Executing instant process termination via os._exit(0)...")
-    for h in root_logger.handlers:
-        try:
-            h.flush()
-        except Exception:
-            pass
-    import os
-    os._exit(0)
-
-
-
 
 # グローバル状態・インスタンスの管理
 config = ConfigManager()
@@ -92,12 +47,83 @@ cast_client: ChromecastCastClient = None
 tracker: AndroidTVTracker = None
 loop: asyncio.AbstractEventLoop = None
 
-# キーボードおよびGUIボタンの長押し処理用の状態辞書
+log_file_path = os.path.join(get_app_dir(), "app_debug.log")
+log_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s (%(threadName)s): %(message)s")
+
+# 1. ターゲットとなる RotatingFileHandler (最大10MB・3世代)
+file_handler = RotatingFileHandler(
+    log_file_path,
+    maxBytes=10 * 1024 * 1024,
+    backupCount=3,
+    encoding="utf-8"
+)
+file_handler.setFormatter(log_formatter)
+active_log_level = logging.INFO if config.enable_logging else (logging.CRITICAL + 1)
+file_handler.setLevel(active_log_level)
+
+# 2. メモリバッファリングハンドラ (30件蓄積 または ERROR発生時に一括ディスクフラッシュ)
+# これにより1ログごとのディスクI/O・同期フラッシュを完全に排除し、I/O負荷を極小化
+memory_handler = MemoryHandler(
+    capacity=30,
+    flushLevel=logging.ERROR,
+    target=file_handler
+)
+memory_handler.setLevel(active_log_level)
+atexit.register(memory_handler.flush)
+
+# 3. コンソール出力ハンドラ
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(log_formatter)
+console_handler.setLevel(logging.INFO)
+
+# 4. ルートロガーの構成 (基本レベルを INFO に引き上げ)
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.handlers = [memory_handler, console_handler]
+
+# 5. サードパーティライブラリの不要な高頻度通信・イベントログを WARNING に抑制
+logging.getLogger("pychromecast").setLevel(logging.WARNING)
+logging.getLogger("zeroconf").setLevel(logging.WARNING)
+logging.getLogger("androidtvremote2").setLevel(logging.WARNING)
+logging.getLogger("flet").setLevel(logging.WARNING)
+logging.getLogger("flet_core").setLevel(logging.WARNING)
+logging.getLogger("flet_runtime").setLevel(logging.WARNING)
+logging.getLogger("flet_transport").setLevel(logging.WARNING)
+logging.getLogger("flet_controls").setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
+if config.enable_logging:
+    logger.info(f"=== Buffered logging initialized -> {log_file_path} (Capacity: 30, FlushLevel: ERROR) ===")
+
+def force_exit_app() -> None:
+    """リソースを解放し、ログをフラッシュしてOSレベルで即時かつ確実にアプリを完全終了させます。"""
+    logger.info("[SHUTDOWN] App termination ordered. Cleaning up resources and terminating process...")
+    try:
+        global tracker, remote_client, cast_client
+        if 'tracker' in globals() and tracker:
+            tracker.stop()
+        if 'remote_client' in globals() and remote_client:
+            remote_client.disconnect()
+        if 'cast_client' in globals() and cast_client:
+            cast_client.disconnect()
+    except Exception as ex:
+        logger.error(f"Shutdown cleanup error: {ex}")
+    try:
+        if 'memory_handler' in globals() and memory_handler:
+            memory_handler.flush()
+    except Exception:
+        pass
+    for h in root_logger.handlers:
+        try:
+            h.flush()
+        except Exception:
+            pass
+    import os
+    os._exit(0)
+
+# キーボード長押し処理用の状態辞書（ボタン長押しは非同期Taskで管理）
 held_keys: Dict[str, float] = {}
 held_keys_lock = threading.Lock()
-
-held_buttons: Dict[str, float] = {}
-held_buttons_lock = threading.Lock()
 
 # ネオンパープル/ブルーのグラデーション定義
 neon_gradient = ft.LinearGradient(
@@ -140,22 +166,34 @@ def get_border_all(width: int, color: str) -> ft.Border:
     return ft.Border(top=side, bottom=side, left=side, right=side)
 
 
+def get_display_width(text: str) -> int:
+    """文字列の視覚的な表示幅を全角=2、半角=1として計算します。"""
+    return sum(2 if unicodedata.east_asian_width(c) in ('F', 'W', 'A') else 1 for c in text)
+
+
+def format_time(seconds: float | None) -> str:
+    """秒数を mm:ss 形式の文字列にフォーマットします。"""
+    if seconds is None or seconds < 0:
+        return "0:00"
+    m, s = divmod(int(seconds), 60)
+    return f"{m}:{s:02d}"
+
+
 def GlassCard(content: ft.Control, width: int = None, height: int = None, padding: int = 12, border_radius: int = 16) -> ft.Container:
-    """グラスモルフィズム風のコンテナカードを生成します。"""
+    """軽量化されたグラス調コンテナカードを生成します（GPUブラー負荷をゼロ化）。"""
     return ft.Container(
         content=content,
         width=width,
         height=height,
         padding=padding,
         border_radius=border_radius,
-        bgcolor="#0fffffff",  # 6% 不透明度の白
-        border=get_border_all(1, "#1effffff"),  # 12% 不透明度の白
-        blur=ft.Blur(15, 15, tile_mode=ft.BlurTileMode.CLAMP),
+        bgcolor="#181822",  # 高視認性・低負荷なダーク背景
+        border=get_border_all(1, "#2D2D3E"),  # 繊細なボーダー
         shadow=ft.BoxShadow(
             spread_radius=1,
-            blur_radius=12,
-            color="#268A2BE2",  # 15% 不透明度のネオンパープル
-            offset=ft.Offset(0, 4)
+            blur_radius=8,
+            color="#1A8A2BE2",  # 軽量なネオンアクセントシャドウ
+            offset=ft.Offset(0, 3)
         )
     )
 
@@ -187,18 +225,8 @@ async def main(page: ft.Page) -> None:
     def window_event(e):
         event_data = e.data if hasattr(e, 'data') else str(e)
         if event_data == "close":
-            logger.info("ウィンドウクローズイベントを受信しました。リソースを解放して強制終了します...")
-            try:
-                if tracker:
-                    tracker.stop()
-                if remote_client:
-                    remote_client.disconnect()
-                if cast_client:
-                    cast_client.disconnect()
-            except Exception as ex:
-                logger.error(f"クリーンアップエラー: {ex}")
-            import os
-            os._exit(0)
+            logger.info("ウィンドウクローズイベントを受信しました。force_exit_app() を呼び出します...")
+            force_exit_app()
 
     page.window.on_event = window_event
 
@@ -237,8 +265,8 @@ async def main(page: ft.Page) -> None:
     FONT_SIZE_BUTTON_MD = 14         # OK Center button
     FONT_SIZE_BUTTON_SM = 13         # Action buttons (Power, Back, Home, Vol etc)
     FONT_SIZE_APP_LABEL = 9          # Quick launch app label
-    FONT_SIZE_MEDIA_TITLE = 11       # Media player title
-    FONT_SIZE_MEDIA_ARTIST = 9       # Media player artist
+    FONT_SIZE_MEDIA_TITLE = 16.5     # Media player title (1.5x of original 11)
+    FONT_SIZE_MEDIA_ARTIST = 11      # Media player artist
 
     initial_scale = max(0.5, min(1.5, config.window_width / 420.0))
     current_scale: float = initial_scale
@@ -403,6 +431,7 @@ async def main(page: ft.Page) -> None:
 
     header_title = ft.Text("Google TV Remote", color="white", weight=ft.FontWeight.BOLD, size=FS(FONT_SIZE_TITLE_MAIN))
     size_label = ft.Text(f"Size: {int(page.window.width)}×{int(page.window.height)}", color="#b3ffffff", size=FS(FONT_SIZE_LABEL))
+    debug_log_label = ft.Text("Debug Log Output:", color="#b3ffffff", size=FS(FONT_SIZE_LABEL))
     opacity_label = ft.Text(f"Opacity: {int(page.window.opacity * 100)}%", color="#b3ffffff", size=FS(FONT_SIZE_LABEL))
     discovered_devices_label = ft.Text("Discovered Devices (Tap to connect):", color="#b3ffffff", size=FS(FONT_SIZE_DEVICE_LABEL))
 
@@ -414,12 +443,18 @@ async def main(page: ft.Page) -> None:
         header_title.size = FS(FONT_SIZE_TITLE_MAIN)
         status_text.size = FS(FONT_SIZE_STATUS)
         size_label.size = FS(FONT_SIZE_LABEL)
+        debug_log_label.size = FS(FONT_SIZE_LABEL)
         opacity_label.size = FS(FONT_SIZE_LABEL)
         discovered_devices_label.size = FS(FONT_SIZE_DEVICE_LABEL)
         settings_accordion_title.size = FS(FONT_SIZE_ACCORDION_TITLE)
         apps_accordion_title.size = FS(FONT_SIZE_ACCORDION_TITLE)
         media_title.size = FS(FONT_SIZE_MEDIA_TITLE)
         media_artist.size = FS(FONT_SIZE_MEDIA_ARTIST)
+        progress_text.size = FS(10)
+        seek_time_val.size = FS(10)
+        seek_icon.size = FS(12)
+        if current_raw_title and current_raw_title != "Media Stopped":
+            start_title_marquee(current_raw_title)
 
     save_timer: Optional[threading.Timer] = None
 
@@ -442,10 +477,20 @@ async def main(page: ft.Page) -> None:
         schedule_config_save()
         size_label.value = f"Size: {new_w}×{new_h}"
         
-        # フォントサイズおよびレイアウト寸法を一括追随更新
+        # フォントサイズおよびレイアウト寸法を一括追随更新（全ツリー再生成を抑制し高速描画）
         update_all_font_sizes()
-        if 'root_listener' in locals() and root_listener:
-            root_listener.content = build_main_layout()
+        page.update()
+
+    def on_logging_change(e):
+        is_enabled = bool(e.control.value)
+        config.enable_logging = is_enabled
+        file_handler.setLevel(logging.DEBUG if is_enabled else (logging.CRITICAL + 1))
+        if is_enabled:
+            logger.info(f"=== Debug logging enabled by user -> {log_file_path} ===")
+            show_info("デバッグログ出力を有効化しました。")
+        else:
+            show_info("デバッグログ出力を無効化しました。")
+        schedule_config_save()
         page.update()
 
     def on_opacity_change(e):
@@ -462,6 +507,12 @@ async def main(page: ft.Page) -> None:
         on_change=on_size_change,
         expand=True
     )
+    debug_log_switch = ft.Switch(
+        value=config.enable_logging,
+        active_color="#8A2BE2",
+        on_change=on_logging_change,
+        scale=0.85
+    )
     opacity_slider = ft.Slider(
         min=0.2, max=1.0, value=config.window_opacity, divisions=16,
         active_color="#00D2FF", inactive_color="#33ffffff",
@@ -476,8 +527,7 @@ async def main(page: ft.Page) -> None:
         except Exception as ex:
             logger.error(f"Failed to destroy window: {ex}")
 
-    global on_close_click_ref
-    on_close_click_ref = on_close_click
+
 
     close_btn = ft.Container(
         content=ft.Text("✕", color="#b3ffffff", size=FS(11), weight=ft.FontWeight.BOLD),
@@ -583,8 +633,16 @@ async def main(page: ft.Page) -> None:
         actions_alignment=ft.MainAxisAlignment.END
     )
     # 6. コールバックとバックグラウンドタスクの定義
+    is_device_connecting = False
+
     async def connect_to_device(device_id: str, ip: str, force: bool = False) -> None:
         """指定されたデバイスへのリモートおよびキャストの接続処理を非同期に行います。"""
+        nonlocal is_device_connecting
+        if is_device_connecting:
+            logger.info(f"別の接続処理が進行中のため、接続要求をスキップします: {ip}")
+            return
+
+        is_device_connecting = True
         show_info(f"Connecting to device: {ip}...")
         status_text.value = f"Status: Connecting... ({ip})"
         status_text.color = "#FFCC00"
@@ -630,6 +688,8 @@ async def main(page: ft.Page) -> None:
             status_text.color = "#FF453A"
             update_device_chips_ui("")
             page.update()
+        finally:
+            is_device_connecting = False
 
     def start_cast_connection(ip: str, force: bool = False) -> None:
         """別スレッドでChromecastCastClientの同期接続を開始します。"""
@@ -646,7 +706,6 @@ async def main(page: ft.Page) -> None:
                 
                 if is_connected:
                     logger.info("Cast client connected successfully.")
-                    cast_client.apply_preferred_language(config.preferred_language)
                     
                     def update_status_connected():
                         status_text.value = f"Status: Connected ({ip})"
@@ -672,9 +731,12 @@ async def main(page: ft.Page) -> None:
     async def send_remote_key(key: str, direction: str) -> None:
         """リモコンキーの送信を実行します。"""
         try:
-            if key in ("VOLUME_UP", "VOLUME_DOWN", "MUTE") and cast_client and cast_client.cast:
-                logger.info(f"キャストクライアント経由で音量・ミュート制御を実行します: {key}")
-                try:
+            if key in ("VOLUME_UP", "VOLUME_DOWN", "MUTE"):
+                if remote_client and remote_client.is_connected:
+                    await remote_client.send_key(key, direction)
+                    return
+                elif cast_client and cast_client.cast:
+                    logger.info(f"リモコン未接続のためキャストクライアント経由で音量制御を実行します: {key}")
                     if key == "VOLUME_UP":
                         cast_client.volume_up()
                     elif key == "VOLUME_DOWN":
@@ -683,12 +745,7 @@ async def main(page: ft.Page) -> None:
                         status = cast_client.cast.status
                         is_muted = status.volume_muted if status else False
                         cast_client.mute(not is_muted)
-                    
-                    if remote_client and remote_client.is_connected:
-                        await remote_client.send_key(key, direction)
                     return
-                except Exception as cast_ex:
-                    logger.warning(f"キャスト経由の音量制御に失敗、リモコン経由を試みます: {cast_ex}")
 
             if key == "POWER":
                 logger.info("電源オフ (POWER) 信号を送信します...")
@@ -726,29 +783,37 @@ async def main(page: ft.Page) -> None:
     # シーク操作のデバウンス保護タイムスタンプ
     last_user_seek_time: float = 0.0
 
-    def perform_seek(button_name: str):
+    def handle_button_press(button_name: str) -> None:
+        """ボタン短押し（タップ）時のキー送信およびメディアシーク処理を実行します。"""
         nonlocal last_user_seek_time
-        last_user_seek_time = time.time()
         
-        delta_seconds = 10.0 if button_name == "RIGHT" else (-10.0 if button_name == "LEFT" else 0.0)
-        
-        if delta_seconds != 0.0 and cast_client and cast_client.cast and cast_client.cast.media_controller:
-            status = cast_client.cast.media_controller.status
-            if status and getattr(status, 'duration', 0):
-                dur = status.duration
-                curr = getattr(status, 'current_time', 0) or 0
-                target = max(0.0, min(dur, curr + delta_seconds))
-                progress_bar.value = min(1.0, max(0.0, target / dur))
-                progress_text.value = f"{format_time(target)} / {format_time(dur)}"
-                page.update()
+        # 左右キーの場合はメディア再生位置の相対シーク（10秒スキップ/巻き戻し）を連携
+        if button_name in ("LEFT", "RIGHT"):
+            last_user_seek_time = time.time()
+            delta_seconds = 10.0 if button_name == "RIGHT" else -10.0
+            
+            # UIシークバーの先行（楽観的）更新
+            if cast_client and cast_client.cast and cast_client.cast.media_controller:
+                status = cast_client.cast.media_controller.status
+                if status and getattr(status, 'duration', 0):
+                    dur = status.duration
+                    curr = getattr(status, 'current_time', 0) or 0
+                    target = max(0.0, min(dur, curr + delta_seconds))
+                    progress_bar.value = min(1.0, max(0.0, target / dur))
+                    progress_text.value = f"{format_time(target)} / {format_time(dur)}"
+                    page.update()
 
-        if remote_client and remote_client.is_connected:
-            asyncio.create_task(send_remote_key(button_name, "SHORT"))
-        elif cast_client and cast_client.cast and button_name in ("LEFT", "RIGHT"):
-            cast_client.seek_relative(delta_seconds)
+            if remote_client and remote_client.is_connected:
+                asyncio.create_task(send_remote_key(button_name, "SHORT"))
+            elif cast_client and cast_client.cast:
+                cast_client.seek_relative(delta_seconds)
+            return
 
-    global perform_seek_ref
-    perform_seek_ref = perform_seek
+        # その他のボタンはリモートキーを送信
+        asyncio.create_task(send_remote_key(button_name, "SHORT"))
+
+    # 外部参照および互換性のためのエイリアス
+    perform_seek = handle_button_press
 
     async def start_button_hold_loop(button_name: str) -> None:
         try:
@@ -756,7 +821,7 @@ async def main(page: ft.Page) -> None:
                 if remote_client and remote_client.is_connected:
                     await remote_client.send_key(button_name, "SHORT")
                 elif cast_client and cast_client.cast and button_name in ("LEFT", "RIGHT"):
-                    perform_seek(button_name)
+                    handle_button_press(button_name)
                 await asyncio.sleep(0.15)  # リピート間隔
         except asyncio.CancelledError:
             pass
@@ -766,22 +831,33 @@ async def main(page: ft.Page) -> None:
     def on_button_tap(button_name: str, container: ft.Container):
         container.bgcolor = "#8A2BE2"
         container.border = get_border_all(2, "#A855F7")
-        page.update()
+        try:
+            container.update()
+        except Exception:
+            page.update()
         
-        perform_seek(button_name)
+        handle_button_press(button_name)
             
-        def reset():
+        async def reset_after_delay():
+            await asyncio.sleep(0.15)
             container.bgcolor = "#1C1C24"
             container.border = get_border_all(1, "#33ffffff")
-            page.update()
-        threading.Timer(0.15, reset).start()
+            try:
+                container.update()
+            except Exception:
+                page.update()
+
+        asyncio.create_task(reset_after_delay())
 
 
 
     def on_long_press_start(button_name: str, container: ft.Container, *args, **kwargs):
         container.bgcolor = "#8A2BE2"
         container.border = get_border_all(2, "#00D2FF")
-        page.update()
+        try:
+            container.update()
+        except Exception:
+            page.update()
         stop_button_hold(button_name)
         held_button_tasks[button_name] = asyncio.create_task(start_button_hold_loop(button_name))
 
@@ -789,7 +865,10 @@ async def main(page: ft.Page) -> None:
         stop_button_hold(button_name)
         container.bgcolor = default_bgcolor
         container.border = get_border_all(1, "#33ffffff")
-        page.update()
+        try:
+            container.update()
+        except Exception:
+            page.update()
 
     # 7. グローバルキーボード操作イベントハンドラ
     async def wait_for_key_long_press(key: str, mapped_key: str, start_time: float) -> None:
@@ -964,6 +1043,10 @@ async def main(page: ft.Page) -> None:
         fit="cover"
     )
 
+    current_raw_title: str = "Media Stopped"
+    marquee_stop_event: Optional[threading.Event] = None
+    marquee_thread: Optional[threading.Thread] = None
+
     media_title = ft.Text(
         "Media Stopped",
         size=FS(FONT_SIZE_MEDIA_TITLE),
@@ -981,14 +1064,104 @@ async def main(page: ft.Page) -> None:
         max_lines=1
     )
 
+    def stop_title_marquee():
+        """タイトルの自動ティッカースクロールを停止します。"""
+        nonlocal marquee_stop_event, marquee_thread
+        if marquee_stop_event:
+            marquee_stop_event.set()
+        marquee_thread = None
+
+    def start_title_marquee(full_title: str):
+        """タイトルが枠からはみ出る場合に横自動スクロール（マーキー）を開始します。"""
+        nonlocal marquee_stop_event, marquee_thread
+        stop_title_marquee()
+
+        def apply_title(txt: str):
+            try:
+                media_title.value = txt
+                try:
+                    media_title.update()
+                except Exception:
+                    if page:
+                        page.update()
+            except Exception:
+                pass
+
+        if not full_title or full_title == "Media Stopped":
+            apply_title(full_title or "Media Stopped")
+            return
+
+        disp_len = get_display_width(full_title)
+        # スケールに応じた表示可能文字幅（全角換算11〜13文字、半角換算22〜26文字相当）
+        max_len = max(14, int(22 * current_scale))
+
+        if disp_len <= max_len:
+            apply_title(full_title)
+            return
+
+        # 枠からはみ出る場合はティッカースクロールを開始
+        marquee_stop_event = threading.Event()
+        stop_evt = marquee_stop_event
+
+        def marquee_loop():
+            spaced_title = full_title + "    "
+            title_chars = list(spaced_title)
+            n = len(title_chars)
+
+            if loop and loop.is_running():
+                loop.call_soon_threadsafe(apply_title, full_title)
+            else:
+                apply_title(full_title)
+
+            # 冒頭を読めるように2.5秒待機
+            if stop_evt.wait(2.5):
+                return
+
+            idx = 0
+            while not stop_evt.is_set():
+                idx = (idx + 1) % n
+                shifted = "".join(title_chars[idx:] + title_chars[:idx])
+
+                if loop and loop.is_running():
+                    loop.call_soon_threadsafe(apply_title, shifted)
+                else:
+                    apply_title(shifted)
+
+                # 1周完了時は2.0秒ポーズ、それ以外は0.8秒間隔で文字送り (CPU/GPU負荷低減)
+                if idx == 0:
+                    if stop_evt.wait(2.0):
+                        break
+                else:
+                    if stop_evt.wait(0.8):
+                        break
+
+        marquee_thread = threading.Thread(target=marquee_loop, daemon=True, name="TitleMarqueeThread")
+        marquee_thread.start()
+
     current_duration: float = 0.0
     is_slider_dragging: bool = False
+
+    seek_icon = ft.Icon("access_time", size=FS(12), color="#00D2FF")
+    seek_time_val = ft.Text("0:00", size=FS(10), color="#00D2FF", weight=ft.FontWeight.BOLD)
+    seek_badge = ft.Container(
+        content=ft.Row([seek_icon, seek_time_val], spacing=4, alignment=ft.MainAxisAlignment.START),
+        bgcolor="#1E1B4B",
+        border=get_border_all(1, "#00D2FF"),
+        border_radius=8,
+        padding=4,
+        visible=False
+    )
 
     def on_slider_change(e):
         nonlocal is_slider_dragging
         is_slider_dragging = True
         current_val = e.control.value
-        progress_text.value = f"{format_time(current_val)} / {format_time(current_duration)} (Seeking...)"
+        formatted_now = format_time(current_val)
+        formatted_total = format_time(current_duration)
+        seek_time_val.value = formatted_now
+        seek_badge.visible = True
+        progress_text.value = f"{formatted_now} / {formatted_total}"
+        progress_bar.label = f"⏱ {formatted_now}"
         page.update()
 
     def on_slider_change_end(e):
@@ -998,6 +1171,8 @@ async def main(page: ft.Page) -> None:
             cast_client.seek(target_val)
         is_slider_dragging = False
         last_user_seek_time = time.time()
+        seek_badge.visible = False
+        progress_bar.label = None
         progress_text.value = f"{format_time(target_val)} / {format_time(current_duration)}"
         page.update()
 
@@ -1011,31 +1186,29 @@ async def main(page: ft.Page) -> None:
         active_color="#8A2BE2",
         inactive_color="#2C2C35",
     )
-    progress_text = ft.Text("0:00 / 0:00", size=9, color="#80ffffff")
-
-    def format_time(seconds: float | None) -> str:
-        if seconds is None or seconds < 0:
-            return "0:00"
-        m, s = divmod(int(seconds), 60)
-        return f"{m}:{s:02d}"
+    progress_text = ft.Text("0:00 / 0:00", size=FS(10), color="#80ffffff")
 
     subtitle_enabled_state: bool = False
 
     def on_subtitle_click(e):
-        nonlocal subtitle_enabled_state
-        subtitle_enabled_state = not subtitle_enabled_state
-        
-        # 1. Android TV Remote 経由で KEYCODE_CAPTIONS (175) を送信
-        send_key(175)
-        
-        # 2. Chromecast CastClient 経由で字幕の表示状態をトグル切り替え (状態同期)
-        if cast_client:
-            actual_sub_state = cast_client.toggle_subtitles(enable=subtitle_enabled_state, language=config.preferred_language)
-            subtitle_enabled_state = actual_sub_state
+        try:
+            nonlocal subtitle_enabled_state
+            subtitle_enabled_state = not subtitle_enabled_state
             
-        subtitle_btn.bgcolor = "#8A2BE2" if subtitle_enabled_state else "#1C1C24"
-        subtitle_btn.border = get_border_all(2 if subtitle_enabled_state else 1, "#00D2FF" if subtitle_enabled_state else "#33ffffff")
-        page.update()
+            # 1. Android TV Remote 経由で CAPTIONS キーを非同期送信
+            if remote_client and remote_client.is_connected:
+                asyncio.create_task(send_remote_key("CAPTIONS", "SHORT"))
+            
+            # 2. Chromecast CastClient 経由で字幕の表示状態をトグル切り替え (状態同期)
+            if cast_client and cast_client.cast:
+                actual_sub_state = cast_client.toggle_subtitles(enable=subtitle_enabled_state, language=config.preferred_language)
+                subtitle_enabled_state = actual_sub_state
+                
+            subtitle_btn.bgcolor = "#8A2BE2" if subtitle_enabled_state else "#1C1C24"
+            subtitle_btn.border = get_border_all(2 if subtitle_enabled_state else 1, "#00D2FF" if subtitle_enabled_state else "#33ffffff")
+            page.update()
+        except Exception as ex:
+            logger.error(f"CCボタン処理エラー: {ex}")
 
     subtitle_btn = ft.Container(
         content=ft.Text("CC", color="white", size=FS(10), weight=ft.FontWeight.BOLD),
@@ -1048,16 +1221,37 @@ async def main(page: ft.Page) -> None:
         on_click=on_subtitle_click
     )
 
+    last_rendered_status: Dict[str, Any] = {}
+
     def on_media_status_changed(status_info: Dict[str, Any]) -> None:
-        logger.info(f"[UI_STATUS_RECEIVE] メディアステータス受信: Title={status_info.get('title')}, State={status_info.get('player_state')}")
+        nonlocal last_rendered_status
+        # 前回のレンダリング状態と主要項目を比較し、完全一致する場合は処理をスキップ
+        is_same = (
+            last_rendered_status.get("title") == status_info.get("title") and
+            last_rendered_status.get("artist") == status_info.get("artist") and
+            last_rendered_status.get("album_name") == status_info.get("album_name") and
+            last_rendered_status.get("player_state") == status_info.get("player_state") and
+            last_rendered_status.get("subtitles_enabled") == status_info.get("subtitles_enabled") and
+            last_rendered_status.get("duration") == status_info.get("duration") and
+            abs((last_rendered_status.get("current_time") or 0.0) - (status_info.get("current_time") or 0.0)) < 0.5
+        )
+        if is_same:
+            return
+
+        last_rendered_status = dict(status_info)
+        logger.info(f"[UI_STATUS_RECEIVE] メディアステータス更新: Title={status_info.get('title')}, State={status_info.get('player_state')}")
+
         def update_ui():
             try:
-                nonlocal current_duration
+                nonlocal current_duration, current_raw_title
                 title = status_info.get("title") or "Media Stopped"
                 artist = status_info.get("artist") or status_info.get("album_name") or "Device Connected"
                 album_art = status_info.get("album_art") or status_info.get("images")
                 
-                media_title.value = title
+                if title != current_raw_title:
+                    current_raw_title = title
+                    start_title_marquee(title)
+                
                 media_artist.value = artist
                 
                 if album_art:
@@ -1075,10 +1269,15 @@ async def main(page: ft.Page) -> None:
                 is_media_stopped = player_state in ("IDLE", "STOPPED", "UNKNOWN") or title == "Media Stopped"
 
                 if is_media_stopped:
+                    stop_title_marquee()
+                    current_raw_title = "Media Stopped"
+                    media_title.value = "Media Stopped"
                     progress_bar.disabled = True
                     progress_bar.value = 0.0
                     progress_bar.max = 100.0
                     progress_text.value = "0:00 / 0:00"
+                    seek_badge.visible = False
+                    progress_bar.label = None
                 else:
                     progress_bar.disabled = False
                     # ユーザーが操作（ドラッグ）中でなく、かつ直近2.5秒以内にリモコンキーでのシークをしていない場合のみ、実機状態と同期
@@ -1116,12 +1315,6 @@ async def main(page: ft.Page) -> None:
 
     cast_client.on_status_changed = on_media_status_changed
 
-
-
-
-
-
-
     def run_cast_action(action: str) -> None:
         try:
             if cast_client and cast_client.cast:
@@ -1137,7 +1330,6 @@ async def main(page: ft.Page) -> None:
                 show_error("Cast feature is not connected.")
         except Exception as ex:
             logger.error(f"Cast action error ({action}): {ex}")
-
 
     def create_media_btn(label: str, name: str, size: int = 14, color: str = "white", bgcolor: str = "#1C1C24", width: int = 36) -> ft.Container:
         btn_container = ft.Container(
@@ -1166,11 +1358,19 @@ async def main(page: ft.Page) -> None:
                 ],
                 spacing=1,
                 expand=True
-            ),
-            subtitle_btn
+            )
         ],
         spacing=8,
         expand=True
+    )
+
+    slider_info_row = ft.Row(
+        [
+            seek_badge,
+            progress_text
+        ],
+        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER
     )
 
     bottom_media_panel = GlassCard(
@@ -1180,7 +1380,7 @@ async def main(page: ft.Page) -> None:
                 ft.Column(
                     [
                         progress_bar,
-                        ft.Row([progress_text], alignment=ft.MainAxisAlignment.END)
+                        slider_info_row
                     ],
                     spacing=2
                 ),
@@ -1193,6 +1393,7 @@ async def main(page: ft.Page) -> None:
             spacing=8
         )
     )
+
 
     # 優先言語ドロップダウン
     lang_label = ft.Text("Preferred Language (キャスト開始時優先言語):", color="#b3ffffff", size=FS(FONT_SIZE_LABEL))
@@ -1236,6 +1437,7 @@ async def main(page: ft.Page) -> None:
                     [
                         ft.Row([size_label], alignment=ft.MainAxisAlignment.START),
                         size_slider,
+                        ft.Row([debug_log_label, debug_log_switch], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                         ft.Row([opacity_label], alignment=ft.MainAxisAlignment.START),
                         opacity_slider,
                         ft.Row([lang_label], alignment=ft.MainAxisAlignment.START),
@@ -1382,10 +1584,10 @@ async def main(page: ft.Page) -> None:
         logger.info("[RESUME_MONITOR] 休止復旧監視タスクを開始しました。")
         last_time = time.time()
         while True:
-            await asyncio.sleep(3)
+            await asyncio.sleep(5)  # 5秒周期で省電力監視
             now = time.time()
-            # 3秒待機したはずなのに、10秒以上経過していた場合はスリープからの復旧とみなす
-            if now - last_time > 10.0:
+            # 5秒待機したはずなのに、12秒以上経過していた場合はスリープからの復旧とみなす
+            if now - last_time > 12.0:
                 logger.warning(f"[RESUME_MONITOR] システム休止復旧を検知しました (時間のギャップ: {now - last_time:.2f}秒)。")
                 show_info("休止状態からの復旧を検知しました。ネットワークとデバイスの再接続を開始します...")
                 
@@ -1426,9 +1628,12 @@ async def main(page: ft.Page) -> None:
         """定期的に接続状態を監視し、切断されている場合は自動的に再接続を試みます。"""
         logger.info("[CONN_MONITOR] 接続監視タスクを開始しました。")
         while True:
-            await asyncio.sleep(15) # 15秒ごとに監視
+            await asyncio.sleep(30) # 30秒ごとに監視
             
             if config.last_device_id and config.last_device_ip:
+                if is_device_connecting:
+                    continue
+
                 is_remote_connected = remote_client and remote_client.is_connected
                 
                 # pychromecast のソケットクライアント接続状態を安全にチェック
@@ -1442,71 +1647,33 @@ async def main(page: ft.Page) -> None:
                             pass
                 
                 if not is_remote_connected or not is_cast_connected:
-                    logger.info(f"[CONN_MONITOR] 接続の切断を検出しました（Remote={is_remote_connected}, Cast={is_cast_connected}）。再接続を試みます...")
-                    
                     # 接続処理中のステータスであれば二重にキックしない
                     if status_text.value and "Connecting" in status_text.value:
-                        logger.info("[CONN_MONITOR] 現在接続処理中のため、自動再接続のキックを見送ります。")
                         continue
-                        
+                    
+                    logger.info(f"[CONN_MONITOR] 接続の切断を検出しました（Remote={is_remote_connected}, Cast={is_cast_connected}）。再接続を試みます...")
                     asyncio.create_task(connect_to_device(config.last_device_id, config.last_device_ip))
 
-    is_poll_running = False
-
-    async def media_status_poll_loop():
-        """Chromecast 接続中、定期的にメディアステータスの更新要求を送ります。"""
-        nonlocal is_poll_running
-        logger.info("[MEDIA_POLL] メディアステータス定期同期タスクを開始しました。")
+    async def log_periodic_flush_loop():
+        """定期的にメモリバッファ内のログをディスクへフラッシュします (15秒周期)。"""
         while True:
-            # 再生状態に応じてポーリング間隔を動的に切り替え
-            # キャスト再生中以外はテレビへの通信負荷を減らすため15秒間隔にする
-            player_state = "UNKNOWN"
-            if cast_client and cast_client.cast and cast_client.cast.media_controller:
-                try:
-                    status = cast_client.cast.media_controller.status
-                    if status:
-                        player_state = status.player_state
-                except Exception:
-                    pass
-
-            sleep_seconds = 3 if player_state in ("PLAYING", "PAUSED", "BUFFERING") else 15
-            await asyncio.sleep(sleep_seconds)
-
-            if is_poll_running:
-                logger.debug("[MEDIA_POLL] 前回の更新要求スレッドがまだ実行中のため、今回のポーリングをスキップします。")
-                continue
-
+            await asyncio.sleep(15)
             try:
-                if cast_client and cast_client.cast:
-                    sc = getattr(cast_client.cast, "socket_client", None)
-                    if sc and hasattr(sc, "is_connected") and sc.is_connected:
-                        mc = getattr(cast_client.cast, "media_controller", None)
-                        if mc and hasattr(mc, "update_status"):
-                            is_poll_running = True
-                            try:
-                                await asyncio.wait_for(asyncio.to_thread(mc.update_status), timeout=2.0)
-                            except asyncio.TimeoutError:
-                                logger.warning("[MEDIA_POLL] update_status がタイムアウトしました。スレッド未完了の可能性があります。")
-                            finally:
-                                is_poll_running = False
-            except Exception as ex:
-                is_poll_running = False
-                logger.debug(f"[MEDIA_POLL] ステータス要求例外: {ex}")
+                if 'memory_handler' in globals() and memory_handler:
+                    memory_handler.flush()
+                for h in root_logger.handlers:
+                    h.flush()
+            except Exception:
+                pass
 
     asyncio.create_task(monitor_system_resume())
     asyncio.create_task(connection_monitor_loop())
-    asyncio.create_task(media_status_poll_loop())
+    asyncio.create_task(log_periodic_flush_loop())
 
     # 10. クローズハンドラでのリソースクリーンアップ（決定論的切断フック）
     def on_window_disconnect(e: ft.ControlEvent) -> None:
-        logger.info("[SHUTDOWN] Flet connection disconnected. Invoking os._exit(0)...")
-        for h in root_logger.handlers:
-            try:
-                h.flush()
-            except Exception:
-                pass
-        import os
-        os._exit(0)
+        logger.info("[SHUTDOWN] Flet connection disconnected. Calling force_exit_app()...")
+        force_exit_app()
 
     page.on_disconnect = on_window_disconnect
 
@@ -1522,13 +1689,7 @@ async def main(page: ft.Page) -> None:
         # 自動接続をキック (初期状態のため force=True で確実にコールバックを紐付け直す)
         asyncio.create_task(connect_to_device(config.last_device_id, config.last_device_ip, force=True))
 
-    # 決定論的クローズフック（Flutter UI切断時に確実に os._exit(0) を実行）
-    def on_window_disconnect(e: ft.ControlEvent) -> None:
-        logger.info("[SHUTDOWN] Flet connection disconnected. Invoking os._exit(0)...")
-        import os
-        os._exit(0)
 
-    page.on_disconnect = on_window_disconnect
 
 
 

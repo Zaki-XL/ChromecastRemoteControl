@@ -27,6 +27,27 @@ class ConfigManager:
     SECTION_WINDOW = 'Window'
     SECTION_SERVER = 'Server'
     SECTION_MEDIA = 'Media'
+
+    # デフォルト設定値の一元管理定義（重複定義の防止）
+    DEFAULT_CONFIG = {
+        'Device': {
+            'last_device_id': '',
+            'last_device_name': '',
+            'last_device_ip': ''
+        },
+        'Window': {
+            'width': '420',
+            'height': '750',
+            'opacity': '1.0',
+            'enable_logging': 'false'
+        },
+        'Server': {
+            'lock_port': '64660'
+        },
+        'Media': {
+            'preferred_language': 'ja'
+        }
+    }
     
     def __init__(self) -> None:
         """ConfigManager を初期化し、必要なディレクトリの作成と設定のロードを行います。"""
@@ -61,32 +82,13 @@ class ConfigManager:
             self.config.read(CONFIG_PATH, encoding='utf-8')
             
             # 必要なセクションが存在しない場合は作成します
-            for section in [self.SECTION_DEVICE, self.SECTION_WINDOW, self.SECTION_SERVER, self.SECTION_MEDIA]:
+            for section in self.DEFAULT_CONFIG:
                 if not self.config.has_section(section):
                     self.config.add_section(section)
             
             # 必要なキーが存在するかチェックし、存在しない場合はデフォルト値で補完します
-            section_defaults = {
-                self.SECTION_DEVICE: {
-                    'last_device_id': '',
-                    'last_device_name': '',
-                    'last_device_ip': ''
-                },
-                self.SECTION_WINDOW: {
-                    'width': '420',
-                    'height': '750',
-                    'opacity': '1.0'
-                },
-                self.SECTION_SERVER: {
-                    'lock_port': '64660'
-                },
-                self.SECTION_MEDIA: {
-                    'preferred_language': 'ja'
-                }
-            }
-            
             updated = False
-            for section, defaults in section_defaults.items():
+            for section, defaults in self.DEFAULT_CONFIG.items():
                 for key, val in defaults.items():
                     if not self.config.has_option(section, key):
                         self.config.set(section, key, val)
@@ -111,21 +113,10 @@ class ConfigManager:
     def initialize_default(self) -> None:
         """設定を初期デフォルト状態にし、config.ini に書き込みます。"""
         self.config.clear()
-        self.config.add_section(self.SECTION_DEVICE)
-        self.config.set(self.SECTION_DEVICE, 'last_device_id', '')
-        self.config.set(self.SECTION_DEVICE, 'last_device_name', '')
-        self.config.set(self.SECTION_DEVICE, 'last_device_ip', '')
-        
-        self.config.add_section(self.SECTION_WINDOW)
-        self.config.set(self.SECTION_WINDOW, 'width', '420')
-        self.config.set(self.SECTION_WINDOW, 'height', '750')
-        self.config.set(self.SECTION_WINDOW, 'opacity', '1.0')
-        
-        self.config.add_section(self.SECTION_SERVER)
-        self.config.set(self.SECTION_SERVER, 'lock_port', '64660')
-
-        self.config.add_section(self.SECTION_MEDIA)
-        self.config.set(self.SECTION_MEDIA, 'preferred_language', 'ja')
+        for section, defaults in self.DEFAULT_CONFIG.items():
+            self.config.add_section(section)
+            for key, val in defaults.items():
+                self.config.set(section, key, val)
         self.save()
 
     @property
@@ -204,6 +195,17 @@ class ConfigManager:
     def window_opacity(self, val: float) -> None:
         """ウィンドウ透明度を設定し、即座にファイルに保存します。"""
         self.config.set(self.SECTION_WINDOW, 'opacity', f'{val:.2f}')
+        self.save()
+
+    @property
+    def enable_logging(self) -> bool:
+        """デバッグログファイルへの出力有効状態を取得します（デフォルト: False）。"""
+        return self.config.getboolean(self.SECTION_WINDOW, 'enable_logging', fallback=False)
+
+    @enable_logging.setter
+    def enable_logging(self, val: bool) -> None:
+        """デバッグログファイルへの出力有効状態を設定し、即座にファイルに保存します。"""
+        self.config.set(self.SECTION_WINDOW, 'enable_logging', 'true' if val else 'false')
         self.save()
 
     # --- Server セクション ---

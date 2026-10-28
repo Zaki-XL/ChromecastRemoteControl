@@ -1,13 +1,30 @@
-import asyncio
 import logging
-from typing import Optional
+from typing import Dict, Optional
 
 from androidtvremote2.androidtv_remote import AndroidTVRemote
 from androidtvremote2.exceptions import CannotConnect, ConnectionClosed, InvalidAuth
-from androidtvremote2.remotemessage_pb2 import RemoteDirection
 
 # ロガーのセットアップ
 logger = logging.getLogger(__name__)
+
+# ライブラリの対応文字列にマッピングするキーコード定数辞書（毎回の関数呼び出しでの再生成を回避）
+KEY_MAP: Dict[str, str] = {
+    "UP": "DPAD_UP",
+    "DOWN": "DPAD_DOWN",
+    "LEFT": "DPAD_LEFT",
+    "RIGHT": "DPAD_RIGHT",
+    "ENTER": "DPAD_CENTER",
+    "BACK": "BACK",
+    "HOME": "HOME",
+    "PLAY_PAUSE": "MEDIA_PLAY_PAUSE",
+    "FAST_FORWARD": "MEDIA_FAST_FORWARD",
+    "REWIND": "MEDIA_REWIND",
+    "CAPTIONS": "CAPTIONS",
+    "CC": "CAPTIONS",
+    "VOLUME_UP": "VOLUME_UP",
+    "VOLUME_DOWN": "VOLUME_DOWN",
+    "MUTE": "VOLUME_MUTE"
+}
 
 class PairingRequiredException(Exception):
     """デバイス接続時にペアリング（認証キーの取得）が必要であることを示す例外。"""
@@ -149,25 +166,6 @@ class AndroidTVRemoteClient:
         """
         if not self.remote:
             raise RuntimeError("クライアントが接続されていません。")
-
-        # ライブラリの対応文字列にマッピングします
-        KEY_MAP = {
-            "UP": "DPAD_UP",
-            "DOWN": "DPAD_DOWN",
-            "LEFT": "DPAD_LEFT",
-            "RIGHT": "DPAD_RIGHT",
-            "ENTER": "DPAD_CENTER",
-            "BACK": "BACK",
-            "HOME": "HOME",
-            "PLAY_PAUSE": "MEDIA_PLAY_PAUSE",
-            "FAST_FORWARD": "MEDIA_FAST_FORWARD",
-            "REWIND": "MEDIA_REWIND",
-            "CAPTIONS": "CAPTIONS",
-            "CC": "CAPTIONS",
-            "VOLUME_UP": "VOLUME_UP",
-            "VOLUME_DOWN": "VOLUME_DOWN",
-            "MUTE": "VOLUME_MUTE"
-        }
 
         # 大文字に正規化
         key_upper = key_code_name.upper()

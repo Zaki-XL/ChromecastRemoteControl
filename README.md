@@ -1,0 +1,141 @@
+# ChromecastRemoteControl
+
+[English](README_EN.md) | 日本語
+
+Chromecast with Google TV / Android TV デバイス向けの、軽量かつ高機能なデスクトップリモコン＆メディアコントローラーアプリケーションです。  
+Python と [Flet](https://flet.dev/)（Flutter エンジン）をベースに構築されており、ネイティブライクなモダン UI と快適な操作性を提供します。
+
+---
+
+## 主な特徴
+
+- **完全なリモコン操作 (Android TV Remote v2)**
+  - 方向キー (D-Pad)、決定、戻る、ホーム、電源、音量、消音
+  - キーボードショートカット操作対応（矢印キー、Enter、Esc、Space、音量キー等）
+  - キーの長押し連続送信・短押しタップの正確な判定
+  - 主要動画配信アプリ（YouTube, Netflix, Prime Video, U-NEXT, ABEMA, TVer 等）のワンクリック起動
+- **Google Cast メディア連携 (pychromecast)**
+  - 現在再生中のメディア情報（タイトル、アーティスト、アルバムアート、再生位置、総時間）のリアルタイム同期
+  - 再生 / 一時停止、スキップ（次へ / 前へ）、シークバーによる任意位置へのシーク
+  - 字幕（CC）のワンクリック有効化 / 無効化および優先言語設定
+  - 長いタイトルに対応する自動マーキースクロール表示
+- **自動デバイス検出 & 自動再接続**
+  - mDNS (Zeroconf) によるローカルネットワーク上の Android TV 自動探索
+  - PC スリープ / 休止状態からの復帰を検知した自動切断クリーンアップ＆再接続
+  - 起動時の前回接続デバイスへの自動接続
+- **洗練されたデスクトップ UI/UX**
+  - ネオングラデーションを基調としたダークサイバーパンク調デザイン
+  - ウィンドウサイズに応じた動的スケーリング（フォント・ボタン寸法の自動追随）
+  - ウィンドウ透明度（Opacity）スライダー調整
+  - 軽量なメモリバッファリング付きデバッグロギング
+
+---
+
+## システム構成図
+
+```mermaid
+graph TD
+    User["ユーザー操作 (GUI / Keyboard)"] --> FletUI["Flet GUI (Flutter UI Engine)"]
+    FletUI --> RemoteClient["AndroidTVRemoteClient<br/>(Port 6466 / 6467 SSL)"]
+    FletUI --> CastClient["ChromecastCastClient<br/>(Port 8009 Socket & Worker)"]
+    FletUI --> Tracker["AndroidTVTracker<br/>(Zeroconf mDNS)"]
+    
+    RemoteClient --> AndroidTV["Google TV / Android TV"]
+    CastClient --> AndroidTV
+    Tracker --> AndroidTV
+```
+
+---
+
+## 必要要件
+
+- **OS**: Windows 10 / 11 (64-bit)
+- **Python**: 3.10 以上 (Python 3.12 推奨)
+- **対象デバイス**: Chromecast with Google TV または Android TV OS 搭載テレビ/端末（同一ローカルネットワーク内に接続）
+
+---
+
+## セットアップ手順
+
+### 1. リポジトリのクローン
+```bash
+git clone https://github.com/Zaki-XL/ChromecastRemoteControl.git
+cd ChromecastRemoteControl
+```
+
+### 2. 仮想環境の作成と依存ライブラリのインストール
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### 3. 初期設定
+初回起動時に `config.ini` が自動生成されます。必要に応じて設定テンプレート `config.example.ini` を参考に手動設定することも可能です。
+
+### 4. 起動
+```bash
+python main.py
+```
+起動用のバッチファイル `build.bat` または `run_app.bat` からも起動できます。
+
+---
+
+## 使い方・ペアリング方法
+
+1. アプリを起動すると、ネットワーク上の Android TV / Chromecast デバイスが自動探索され、上部にチップとして表示されます。
+2. 初回接続時、テレビ画面に **6桁のPINコード** が表示されます。
+3. アプリの入力ダイアログにPINコードを入力して「送信」を押すと、SSLペアリングが完了します（証明書は `certs/` に保存され、次回以降自動接続されます）。
+4. 画面上のリモコンボタンまたはキーボードでテレビを直感的に操作できます。
+
+---
+
+## キーボードショートカット
+
+| キー | 操作内容 |
+| :--- | :--- |
+| `↑` `↓` `←` `→` | 方向キー移動 (D-Pad) |
+| `Enter` | 決定 (OK) |
+| `Backspace` / `Escape` | 戻る (BACK) |
+| `Home` | ホーム画面 (HOME) |
+| `Space` | メディア再生 / 一時停止 |
+| `Page Up` / `+` | 音量アップ |
+| `Page Down` / `-` | 音量ダウン |
+| `M` | 消音 (MUTE) |
+
+---
+
+## EXE ビルド方法
+
+PyInstaller を用いて単一のスタンドアロン実行可能ファイル (`GoogleTVRemote.exe`) を生成できます。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File build_app.ps1
+```
+ビルド完了後、ルートディレクトリおよび `dist/` フォルダ配下に実行ファイルが生成されます。
+
+---
+
+## ファイル構成
+
+```text
+ChromecastRemoteControl/
+├── main.py              # アプリケーションエントリーポイント & Flet GUI
+├── cast_client.py       # pychromecast ラッパー（メディア同期・ワーカースレッド）
+├── remote_client.py     # androidtvremote2 ラッパー（リモコン操作・SSL通信）
+├── device_tracker.py    # Zeroconf による mDNS デバイス自動探索
+├── config_manager.py    # config.ini 設定管理
+├── requirements.txt     # 依存 Python パッケージ一覧
+├── build_app.ps1        # PyInstaller ビルドスクリプト
+├── build.bat            # 簡易ビルドバッチ
+├── config.example.ini   # 設定ひな形テンプレート
+├── README.md            # 日本語ドキュメント
+├── README_EN.md         # 英語ドキュメント
+└── LICENSE              # ライセンス表記 (MIT)
+```
+
+---
+
+## ライセンス
+
+本プロジェクトは [MIT License](LICENSE) の下で公開されています。
