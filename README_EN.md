@@ -17,8 +17,12 @@ Built with Python and [Flet](https://flet.dev/) (powered by the Flutter engine),
 - **Google Cast Media Integration (pychromecast)**
   - Real-time media metadata synchronization (Title, Artist, Album Art, Progress, Duration)
   - Play / Pause, Next / Previous, and interactive seek bar scrubbing
-  - Subtitle / Closed Caption toggle with preferred language configuration
+  - One-click Subtitle / Closed Caption toggle
   - Smooth auto-marquee scrolling for long media titles
+- **Multilingual Support**
+  - **Automatic Preferred Language Subtitles**: Automatically detects and applies subtitle tracks matching your preferred language code (e.g., Japanese `ja`, English `en`) when cast playback begins
+  - **Dynamic Language Selection**: Change your preferred language instantly from the in-app settings
+  - **Bilingual Documentation**: Fully documented in both English ([README_EN.md](README_EN.md)) and Japanese ([README.md](README.md))
 - **Auto Device Discovery & Seamless Reconnection**
   - Automatic Android TV device discovery on the local network via mDNS (Zeroconf)
   - Automatic recovery and socket reconnection after PC sleep or hibernation
@@ -86,6 +90,17 @@ python main.py
 2. On your first connection to a device, a **6-digit pairing PIN** will appear on your TV screen.
 3. Enter the PIN into the pairing dialog in the app and submit. SSL certificates will be saved to `certs/` for seamless automatic authentication in future sessions.
 4. Control your TV using the on-screen remote or keyboard shortcuts.
+
+---
+
+## Multilingual & Subtitle Settings
+
+Inside the **Settings & Devices** accordion, you will find the **Preferred Language** configuration.
+
+- **Supported Codes**: Japanese (`ja`), English (`en`), etc.
+- **Behavior**:
+  - When media streaming starts, the app automatically enables subtitles matching your preferred language if an appropriate track is present.
+  - You can also toggle subtitles ON or OFF at any time using the "CC" button in the bottom playback control bar.
 
 ---
 
