@@ -2,8 +2,12 @@
 
 [English](README_EN.md) | 日本語
 
-Chromecast with Google TV / Android TV デバイス向けの、軽量かつ高機能なデスクトップリモコン＆メディアコントローラーアプリケーションです。  
+Chromecast with Google TV / Google TV Streamer / Android TV デバイス向けの、軽量かつ高機能なデスクトップリモコン＆メディアコントローラーアプリケーションです。  
 Python と [Flet](https://flet.dev/)（Flutter エンジン）をベースに構築されており、ネイティブライクなモダン UI と快適な操作性を提供します。
+
+<p align="center">
+  <img src="scr.png" alt="Google TV Remote Screenshot" width="400">
+</p>
 
 ---
 
@@ -12,7 +16,11 @@ Python と [Flet](https://flet.dev/)（Flutter エンジン）をベースに構
 - **完全なリモコン操作 (Android TV Remote v2)**
   - 方向キー (D-Pad)、決定、戻る、ホーム、電源、音量、消音
   - キーボードショートカット操作対応（矢印キー、Enter、Esc、Space、音量キー等）
-  - キーの長押し連続送信・短押しタップの正確な判定
+  - キーの長押し連続送信・短押しタップの正確な判定（付属物理リモコンと同一のOS標準キーイベント送信）
+  - **長押し加速早送り (Hold-to-Accelerate)**: 左右キー長押し時に物理リモコンと同様に一段階加速（2倍速・高速シーク）が自動発動
+- **YouTube ダイレクト検索 (YouTube Search)**
+  - アコーディオンメニューから PC キーボードでキーワードを入力し、テレビ画面や再生状態に関わらず一撃で YouTube 検索結果一覧へダイレクトジャンプ
+  - 面倒なテレビ画面上のオンスクリーンキーボード操作を完全に不要化
   - 主要動画配信アプリ（YouTube, Netflix, Prime Video, U-NEXT, ABEMA, TVer 等）のワンクリック起動
 - **Google Cast メディア連携 (pychromecast)**
   - 現在再生中のメディア情報（タイトル、アーティスト、アルバムアート、再生位置、総時間）のリアルタイム同期
@@ -55,7 +63,38 @@ graph TD
 
 - **OS**: Windows 10 / 11 (64-bit)
 - **Python**: 3.10 以上 (Python 3.12 推奨)
-- **対象デバイス**: Chromecast with Google TV または Android TV OS 搭載テレビ/端末（同一ローカルネットワーク内に接続）
+- **対象デバイス**: Google TV Streamer、Chromecast with Google TV、または Android TV OS 搭載テレビ/端末（同一ローカルネットワーク内に接続）
+
+---
+
+## 対応デバイス一覧 & 世代・モデルによる仕様差 (重要)
+
+本アプリケーションは、**Google TV / Android TV OS 搭載デバイス専用**のリモコンアプリです。  
+従来の古い Chromecast（第1〜第3世代、Chromecast Ultra）と、Chromecast with Google TV / Google TV Streamer では、内部 OS および通信プロトコルが根本的に異なるため、動作可否が分かれます。
+
+### デバイス対応マトリクス
+
+| デバイス名 | 発売年 | 搭載 OS | リモコン操作<br>(Port 6467) | メディア情報同期<br>(Port 8009) | 本アプリの対応状況 |
+| :--- | :---: | :--- | :---: | :---: | :---: |
+| **Google TV Streamer (4K)** | 2024 | Google TV (Android 14) | ✅ 完全対応 | ✅ 完全対応 | **対応 (推奨)** |
+| **Chromecast with Google TV (4K)** | 2020 | Google TV (Android 10〜12) | ✅ 完全対応 | ✅ 完全対応 | **対応 (推奨)** |
+| **Chromecast with Google TV (HD)** | 2022 | Google TV (Android 12) | ✅ 完全対応 | ✅ 完全対応 | **対応 (推奨)** |
+| **各社 Android TV / Google TV 搭載テレビ・STB**<br>(BRAVIA, AQUOS, VIERA, REGZA, TCL, SHIELD TV 等) | - | Android TV / Google TV | ✅ 完全対応 | ✅ 完全対応 | **対応** |
+| **Chromecast Ultra (4K)** | 2016 | 独自 Cast OS (Linux/Chrome) | ❌ 非対応 | ⚠️ 一部のみ | **非対応 (対象外)** |
+| **Chromecast (第3世代)** | 2018 | 独自 Cast OS (Linux/Chrome) | ❌ 非対応 | ⚠️ 一部のみ | **非対応 (対象外)** |
+| **Chromecast (第2世代)** | 2015 | 独自 Cast OS (Linux/Chrome) | ❌ 非対応 | ⚠️ 一部のみ | **非対応 (対象外)** |
+| **Chromecast (第1世代)** | 2013 | 独自 Cast OS (Linux/Chrome) | ❌ 非対応 | ⚠️ 一部のみ | **非対応 (対象外)** |
+| **Chromecast Audio** | 2015 | 独自 Cast OS (Linux/Chrome) | ❌ 非対応 | ⚠️ 一部のみ | **非対応 (対象外)** |
+
+### 従来の古い Chromecast（第1〜3世代、Ultra）が非対応である理由
+
+1. **Android TV Remote プロトコル (Port 6467) が存在しない**:
+   - 古い第1〜3世代 Chromecast および Chromecast Ultra は、Android OS ではなくブラウザレシーバーのみを実行する軽量 Linux/Chrome ファームウェアを採用しています。
+   - そのため、本アプリの根幹である D-Pad（方向キー）、決定、戻る、ホーム、電源、音量、アプリ起動などのリモコン制御サービス（`_androidtvremote2._tcp.local.`）が存在しません。
+2. **mDNS 自動検出の挙動**:
+   - 本アプリのネットワーク自動探索は Android TV Remote サービスを検出対象としているため、古い Chromecast はペアリング対象として一覧に表示されません。
+3. **キーイベント一本化による安定動作**:
+   - 本アプリのリモコン操作（早送り・巻き戻しを含む）は、付属物理リモコンと同一の Android OS 標準キーイベント（`DPAD_RIGHT` / `DPAD_LEFT`）を送信します。古い Chromecast にはキー入力をディスパッチする OS/UI 基盤が存在しないため、リモコン機能をご利用いただくことはできません。
 
 ---
 
@@ -64,7 +103,7 @@ graph TD
 Python 環境の構築を行わずに、すぐに利用できるスタンドアロン版（EXE）を配布しています。
 
 1. **ZIP パッケージのダウンロード**:  
-   [GitHub Releases](https://github.com/Zaki-XL/ChromecastRemoteControl/releases) から最新バージョンの `GoogleTVRemote_vX.X.X_win64.zip` をダウンロードします。
+   [GitHub Releases](https://github.com/Zaki-XL/ChromecastRemoteControl/releases) から最新バージョンの `GoogleTVRemote_v1.1.0_win64.zip` をダウンロードします。
 2. **展開（解凍）**:  
    ダウンロードした ZIP ファイルを任意のフォルダー（例: ドキュメントフォルダーやデスクトップなど）に展開します。
 3. **起動**:  
@@ -159,18 +198,21 @@ powershell -ExecutionPolicy Bypass -File build_app.ps1
 
 ```text
 ChromecastRemoteControl/
-├── main.py              # アプリケーションエントリーポイント & Flet GUI
-├── cast_client.py       # pychromecast ラッパー（メディア同期・ワーカースレッド）
-├── remote_client.py     # androidtvremote2 ラッパー（リモコン操作・SSL通信）
-├── device_tracker.py    # Zeroconf による mDNS デバイス自動探索
-├── config_manager.py    # config.ini 設定管理
-├── requirements.txt     # 依存 Python パッケージ一覧
-├── build_app.ps1        # PyInstaller ビルドスクリプト
-├── build.bat            # 簡易ビルドバッチ
-├── config.example.ini   # 設定ひな形テンプレート
-├── README.md            # 日本語ドキュメント
-├── README_EN.md         # 英語ドキュメント
-└── LICENSE              # ライセンス表記 (MIT)
+├── main.py                  # ルート起動エントリーポイント
+├── src/                     # プロダクションコード集約ディレクトリ
+│   ├── __init__.py          # パッケージ初期化
+│   ├── main.py              # アプリケーション本体 & Flet GUI
+│   ├── cast_client.py       # pychromecast ラッパー（メディア同期・ワーカースレッド）
+│   ├── remote_client.py     # androidtvremote2 ラッパー（リモコン操作・SSL通信）
+│   ├── device_tracker.py    # Zeroconf による mDNS デバイス自動探索
+│   └── config_manager.py    # config.ini 設定管理
+├── requirements.txt         # 依存 Python パッケージ一覧
+├── build_app.ps1            # PyInstaller ビルドスクリプト
+├── build.bat                # 簡易ビルドバッチ
+├── config.example.ini       # 設定ひな形テンプレート
+├── README.md                # 日本語ドキュメント
+├── README_EN.md             # 英語ドキュメント
+└── LICENSE                  # ライセンス表記 (MIT)
 ```
 
 ---

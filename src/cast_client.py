@@ -10,6 +10,20 @@ from pychromecast.controllers.media import MediaStatus, MediaStatusListener
 # ロガーのセットアップ
 logger = logging.getLogger(__name__)
 
+class ChromecastDeviceStatusListener:
+    """Chromecast 本体の状態変更（フォアグラウンドアプリの起動・終了等）を監視するリスナー。
+    
+    テレビ側からプッシュされる CastStatus イベントを受信し、メディアセッションの更新をトリガーします。
+    """
+
+    def __init__(self, callback: Callable[[Any], None]) -> None:
+        self.callback = callback
+
+    def new_cast_status(self, status: Any) -> None:
+        """新しい CastStatus を受信した際に呼び出されます。"""
+        self.callback(status)
+
+
 class ChromecastMediaListener(MediaStatusListener):
     """Chromecastのメディア再生状態の変更を監視し、コールバック関数を起動するリスナークラス。"""
 
@@ -55,7 +69,9 @@ class ChromecastCastClient:
         self.on_status_changed = on_status_changed
         self.cast: Optional[pychromecast.Chromecast] = None
         self.listener: Optional[ChromecastMediaListener] = None
+        self.cast_status_listener: Optional[ChromecastDeviceStatusListener] = None
         self._executor: Optional[ThreadPoolExecutor] = None
+        self._cached_media_status: Optional[Dict[str, Any]] = None
         
         # UI更新用のイベントループをキャプチャします
         try:
@@ -129,7 +145,12 @@ class ChromecastCastClient:
             self.cast = None
             raise RuntimeError(f"Chromecast 接続失敗: {e}") from e
 
-        # メディアステータスリスナーの登録
+        # 1. Chromecast 本体の状態リスナーの登録 (アプリ切り替え等を完全イベント駆動で受動検知)
+        self.cast_status_listener = ChromecastDeviceStatusListener(self._handle_cast_status_change)
+        if hasattr(self.cast, "register_status_listener"):
+            self.cast.register_status_listener(self.cast_status_listener)
+
+        # 2. メディアステータスリスナーの登録 (再生・一時停止・トラック変更の自動プッシュ受取)
         self.listener = ChromecastMediaListener(self._handle_media_status_change)
         self.cast.media_controller.register_status_listener(self.listener)
 
@@ -188,6 +209,7 @@ class ChromecastCastClient:
             finally:
                 self.cast = None
                 self.listener = None
+                self._cached_media_status = None
                 if self._executor:
                     try:
                         self._executor.shutdown(wait=False, cancel_futures=True)
@@ -328,7 +350,7 @@ class ChromecastCastClient:
             if self.cast and self.cast.media_controller:
                 mc = self.cast.media_controller
                 status = mc.status
-                current = getattr(status, 'current_time', 0) or 0
+                current = getattr(status, 'adjusted_current_time', None) or getattr(status, 'current_time', 0) or 0
                 duration = getattr(status, 'duration', 0) or 0
 
                 target = max(0.0, current + delta_seconds)
@@ -366,9 +388,43 @@ class ChromecastCastClient:
 
     def stop(self) -> None:
         """メディアの再生を停止（STOP）します。"""
+        self._cached_media_status = None
         if self.cast and self.cast.media_controller:
             logger.info("メディア停止(STOP)コマンドを非同期スレッドで送信します")
             self._run_in_thread(self.cast.media_controller.stop)
+
+    def _handle_cast_status_change(self, status: Any) -> None:
+        """テレビ側でアプリが起動・切り替わったイベントを受信した際のハンドラ。
+        
+        ポーリングを行わず、テレビ側からのプッシュ通知契機でのみ受動的にメディア情報を確認します。
+        """
+        try:
+            app_id = getattr(status, "app_id", None)
+            display_name = getattr(status, "display_name", None)
+            logger.info(f"CastStatus 受信 (イベント駆動): App={display_name} ({app_id})")
+            
+            is_stand_by = getattr(status, "is_stand_by", False)
+            # テレビがスタンバイになった場合は、確実に UI を停止状態として同期
+            if is_stand_by:
+                self._cached_media_status = None
+                idle_status = {
+                    'player_state': 'IDLE',
+                    'title': 'Media Stopped',
+                    'artist': 'Device Connected',
+                    'album_name': None,
+                    'album_art': None,
+                    'current_time': 0.0,
+                    'duration': 0.0,
+                    'subtitles_enabled': False,
+                    'playback_rate': 1.0
+                }
+                if self.on_status_changed and self.loop and self.loop.is_running():
+                    if asyncio.iscoroutinefunction(self.on_status_changed):
+                        asyncio.run_coroutine_threadsafe(self.on_status_changed(idle_status), self.loop)
+                    else:
+                        self.loop.call_soon_threadsafe(self.on_status_changed, idle_status)
+        except Exception as ex:
+            logger.debug(f"CastStatus 処理例外: {ex}")
 
     def _handle_media_status_change(self, status: MediaStatus) -> None:
         """SocketClientの受信スレッドから呼び出され、受信した生ステータスを
@@ -403,6 +459,13 @@ class ChromecastCastClient:
             if player_state in ("IDLE", "STOPPED", "UNKNOWN"):
                 playback_rate = 1.0
 
+            # 一時的な通信再接続（UNKNOWN / 空タイトル）時のメディア情報保護
+            # 再生中にソケット再ネゴシエーションで空ステータスが飛んできた場合、直前の有効なメディア情報を維持する
+            if player_state == "UNKNOWN" and not title:
+                if self._cached_media_status and self._cached_media_status.get("player_state") in ("PLAYING", "PAUSED", "BUFFERING"):
+                    logger.debug("一時的な UNKNOWN ステータスを受信したため、直前の有効なメディア情報を維持します。")
+                    return
+
             # GUIが必要とする拡張メタデータスキーマに整形
             status_data = {
                 'player_state': player_state,
@@ -415,6 +478,12 @@ class ChromecastCastClient:
                 'subtitles_enabled': bool(active_ids),
                 'playback_rate': playback_rate
             }
+
+            # 有効な再生中ステータスであればキャッシュを更新、明示的な停止であればキャッシュをクリア
+            if player_state in ("PLAYING", "PAUSED", "BUFFERING") and title:
+                self._cached_media_status = status_data
+            elif player_state in ("IDLE", "STOPPED"):
+                self._cached_media_status = None
 
             logger.debug(f"メディアステータス変化を受信: {status_data}")
 

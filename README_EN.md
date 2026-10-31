@@ -2,8 +2,12 @@
 
 English | [日本語 (Japanese)](README.md)
 
-A lightweight, feature-rich desktop remote control and media controller for Chromecast with Google TV and Android TV devices.  
+A lightweight, feature-rich desktop remote control and media controller for Chromecast with Google TV, Google TV Streamer, and Android TV devices.  
 Built with Python and [Flet](https://flet.dev/) (powered by the Flutter engine), providing a native-like modern desktop experience.
+
+<p align="center">
+  <img src="scr.png" alt="Google TV Remote Screenshot" width="400">
+</p>
 
 ---
 
@@ -12,7 +16,11 @@ Built with Python and [Flet](https://flet.dev/) (powered by the Flutter engine),
 - **Full Remote Navigation (Android TV Remote v2)**
   - D-Pad (Up, Down, Left, Right), Enter, Back, Home, Power, Volume Up/Down, and Mute
   - Keyboard shortcut support (Arrow keys, Enter, Esc, Space, Volume keys, etc.)
-  - Accurate short-tap and long-press repeat key detection
+  - Accurate short-tap and long-press repeat key detection (sends standard OS key events identical to physical remotes)
+  - **Hold-to-Accelerate Fast-Forward**: Holding Left/Right keys triggers native accelerated seek (2x speed / rapid seek) just like the physical remote
+- **YouTube Direct Search (YouTube Search)**
+  - Enter keywords from your PC keyboard via the search accordion to instantly deep-link to YouTube search results from any screen or active playback
+  - Completely eliminates the need to fumble with clumsy TV on-screen keyboards
   - One-click launcher for major streaming apps (YouTube, Netflix, Prime Video, etc.)
 - **Google Cast Media Integration (pychromecast)**
   - Real-time media metadata synchronization (Title, Artist, Album Art, Progress, Duration)
@@ -55,7 +63,38 @@ graph TD
 
 - **OS**: Windows 10 / 11 (64-bit)
 - **Python**: 3.10 or higher (Python 3.12 recommended)
-- **Target Device**: Chromecast with Google TV or any Android TV device connected to the same local network
+- **Target Device**: Google TV Streamer, Chromecast with Google TV, or any Android TV OS smart TV/device connected to the same local network
+
+---
+
+## Supported Devices & Architecture Differences (Important)
+
+This application is designed **exclusively for devices running Google TV or Android TV OS**.  
+Legacy Chromecast models (1st to 3rd generation, Chromecast Ultra) and modern Google TV devices (Chromecast with Google TV, Google TV Streamer) have fundamentally different operating systems and protocol stacks.
+
+### Device Compatibility Matrix
+
+| Device Model | Release Year | Operating System | Remote Navigation<br>(Port 6467) | Media Sync<br>(Port 8009) | Status |
+| :--- | :---: | :--- | :---: | :---: | :---: |
+| **Google TV Streamer (4K)** | 2024 | Google TV (Android 14) | ✅ Full Support | ✅ Full Support | **Supported (Recommended)** |
+| **Chromecast with Google TV (4K)** | 2020 | Google TV (Android 10–12) | ✅ Full Support | ✅ Full Support | **Supported (Recommended)** |
+| **Chromecast with Google TV (HD)** | 2022 | Google TV (Android 12) | ✅ Full Support | ✅ Full Support | **Supported (Recommended)** |
+| **Android TV / Google TV Smart TVs & STBs**<br>(BRAVIA, AQUOS, VIERA, REGZA, TCL, SHIELD TV, etc.) | - | Android TV / Google TV | ✅ Full Support | ✅ Full Support | **Supported** |
+| **Chromecast Ultra (4K)** | 2016 | Embedded Cast OS (Linux/Chrome) | ❌ Not Available | ⚠️ Partial Only | **Unsupported** |
+| **Chromecast (3rd Gen)** | 2018 | Embedded Cast OS (Linux/Chrome) | ❌ Not Available | ⚠️ Partial Only | **Unsupported** |
+| **Chromecast (2nd Gen)** | 2015 | Embedded Cast OS (Linux/Chrome) | ❌ Not Available | ⚠️ Partial Only | **Unsupported** |
+| **Chromecast (1st Gen)** | 2013 | Embedded Cast OS (Linux/Chrome) | ❌ Not Available | ⚠️ Partial Only | **Unsupported** |
+| **Chromecast Audio** | 2015 | Embedded Cast OS (Linux/Chrome) | ❌ Not Available | ⚠️ Partial Only | **Unsupported** |
+
+### Why Legacy Chromecast (1st–3rd Gen / Ultra) Is Unsupported
+
+1. **Absence of Android TV Remote Protocol (Port 6467)**:
+   - Legacy Chromecast models and Chromecast Ultra run a lightweight receiver OS designed solely for browser-like Cast rendering, lacking an underlying Android operating system.
+   - Consequently, the remote navigation service (`_androidtvremote2._tcp.local.`) that powers D-Pad navigation, Home, Back, Power, Volume, and app launching is not present on these devices.
+2. **mDNS Auto-Discovery Behavior**:
+   - The app's network scanner searches specifically for Android TV Remote v2 endpoints. Legacy Cast-only devices will not be listed in the device selector.
+3. **Unified Remote Input Architecture**:
+   - All navigation and media skip/fast-forward actions send standard Android OS key events identical to the official physical remote, preventing ANRs and app freezing. Because legacy Chromecasts lack an OS-level key dispatch system, remote control is not supported.
 
 ---
 
@@ -64,7 +103,7 @@ graph TD
 Pre-built standalone Windows executables (EXE) are provided so you can run the app without installing Python.
 
 1. **Download ZIP**:  
-   Download the latest `GoogleTVRemote_vX.X.X_win64.zip` from [GitHub Releases](https://github.com/Zaki-XL/ChromecastRemoteControl/releases).
+   Download the latest `GoogleTVRemote_v1.1.0_win64.zip` from [GitHub Releases](https://github.com/Zaki-XL/ChromecastRemoteControl/releases).
 2. **Extract**:  
    Extract (unzip) the archive to any folder of your choice (e.g., in Documents or Desktop).
 3. **Launch**:  
@@ -158,18 +197,21 @@ The compiled executable will be placed in the root directory and `dist/`.
 
 ```text
 ChromecastRemoteControl/
-├── main.py              # Application entry point & Flet GUI layout
-├── cast_client.py       # pychromecast wrapper (Media sync & worker thread)
-├── remote_client.py     # androidtvremote2 wrapper (Remote control & SSL)
-├── device_tracker.py    # Zeroconf mDNS auto-discovery service
-├── config_manager.py    # Configuration loader & manager
-├── requirements.txt     # Python dependency specifications
-├── build_app.ps1        # PyInstaller build automation script
-├── build.bat            # Batch launcher for build
-├── config.example.ini   # Configuration template
-├── README.md            # Japanese documentation
-├── README_EN.md         # English documentation
-└── LICENSE              # MIT License
+├── main.py                  # Root application entry point
+├── src/                     # Core production source directory
+│   ├── __init__.py          # Package initialization
+│   ├── main.py              # Application entry point & Flet GUI layout
+│   ├── cast_client.py       # pychromecast wrapper (Media sync & worker thread)
+│   ├── remote_client.py     # androidtvremote2 wrapper (Remote control & SSL)
+│   ├── device_tracker.py    # Zeroconf mDNS auto-discovery service
+│   └── config_manager.py    # Configuration loader & manager
+├── requirements.txt         # Python dependency specifications
+├── build_app.ps1            # PyInstaller build automation script
+├── build.bat                # Batch launcher for build
+├── config.example.ini       # Configuration template
+├── README.md                # Japanese documentation
+├── README_EN.md             # English documentation
+└── LICENSE                  # MIT License
 ```
 
 ---

@@ -9,8 +9,8 @@ if getattr(sys, 'frozen', False):
     # PyInstallerでパッケージ化された実行ファイルの場合
     BASE_DIR = os.path.dirname(sys.executable)
 else:
-    # 通常のPythonスクリプト実行の場合
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    # 通常のPythonスクリプト実行の場合（src/ の親フォルダー＝プロジェクトルート）
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 設定ファイルおよび証明書ディレクトリのパスを設定します
 CONFIG_PATH = os.path.join(BASE_DIR, 'config.ini')

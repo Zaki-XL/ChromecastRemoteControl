@@ -23,7 +23,9 @@ KEY_MAP: Dict[str, str] = {
     "CC": "CAPTIONS",
     "VOLUME_UP": "VOLUME_UP",
     "VOLUME_DOWN": "VOLUME_DOWN",
-    "MUTE": "VOLUME_MUTE"
+    "MUTE": "VOLUME_MUTE",
+    "ASSIST": "ASSIST",
+    "SEARCH": "SEARCH"
 }
 
 class PairingRequiredException(Exception):
@@ -181,6 +183,18 @@ class AndroidTVRemoteClient:
         logger.debug(f"キー送信: {mapped_key} ({dir_upper})")
         # send_key_command は非ブロッキングでバッファリング送信されます
         self.remote.send_key_command(mapped_key, dir_upper)
+
+
+    async def send_text(self, text: str) -> None:
+        """指定されたテキストを Android TV の入力フィールドに送信します。
+        
+        Args:
+            text: 送信する文字列。
+        """
+        if not self.remote:
+            raise RuntimeError("クライアントが接続されていません。")
+        logger.info(f"テキスト送信: {text}")
+        self.remote.send_text(text)
 
     async def launch_app(self, app_link: str) -> None:
         """ディープリンク（またはパッケージ名）を使用してアプリを起動します。

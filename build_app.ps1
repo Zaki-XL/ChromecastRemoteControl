@@ -4,8 +4,8 @@ Write-Host "=== Google TV Remote Build Script ===" -ForegroundColor Blue
 
 # Kill running instance before build to prevent file lock on Copy-Item
 Write-Host "Stopping any running instance of GoogleTVRemote.exe..." -ForegroundColor Cyan
-taskkill /F /IM GoogleTVRemote.exe 2>$null
-Start-Sleep -Seconds 1
+Get-Process GoogleTVRemote -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 500
 
 # Check PyInstaller installation
 Write-Host "Checking for PyInstaller..." -ForegroundColor Cyan
@@ -37,9 +37,9 @@ if (Test-Path "GoogleTVRemote.spec") {
     Remove-Item -Force "GoogleTVRemote.spec"
 }
 
-# --- ガードレール 1: ビルド前自動テスト (構文・属性解決・UI完全初期化) ---
+# --- ガードレール 1: ビルド前自動テスト (構文・属性解決・実コンポーネント検証) ---
 Write-Host "`n[TEST GATE] Running Pre-Build Automated Tests..." -ForegroundColor Yellow
-python run_tests.py --pre-build
+python tests/run_tests.py --pre-build
 if ($LASTEXITCODE -ne 0) {
     Write-Host "`n========================================" -ForegroundColor Red
     Write-Host "Error: Pre-build test failed! Packaging aborted." -ForegroundColor Red
@@ -50,9 +50,9 @@ if ($LASTEXITCODE -ne 0) {
 # Run PyInstaller build
 Write-Host "`nStarting PyInstaller single-file packaging..." -ForegroundColor Cyan
 if ($runCmd -eq "pyinstaller") {
-    pyinstaller --clean --onefile --noconsole --name="GoogleTVRemote" main.py
+    pyinstaller --clean --onefile --noconsole --paths="src" --collect-data flet --name="GoogleTVRemote" main.py
 } else {
-    python -m PyInstaller --clean --onefile --noconsole --name="GoogleTVRemote" main.py
+    python -m PyInstaller --clean --onefile --noconsole --paths="src" --collect-data flet --name="GoogleTVRemote" main.py
 }
 
 $buildExitCode = $LASTEXITCODE
@@ -71,7 +71,7 @@ if ($buildExitCode -eq 0 -and (Test-Path $exePath)) {
     
     # --- ガードレール 2: ビルド後自動テスト (EXE起動 & ログエラーゼロ検査) ---
     Write-Host "`n[TEST GATE] Running Post-Build EXE & Log Error Verification..." -ForegroundColor Yellow
-    python run_tests.py --post-build
+    python tests/run_tests.py --post-build
     if ($LASTEXITCODE -ne 0) {
         Write-Host "`n========================================" -ForegroundColor Red
         Write-Host "Error: Post-build EXE verification failed! Application has runtime errors." -ForegroundColor Red
