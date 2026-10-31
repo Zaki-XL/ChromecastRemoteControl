@@ -103,7 +103,7 @@ graph TD
 Python 環境の構築を行わずに、すぐに利用できるスタンドアロン版（EXE）を配布しています。
 
 1. **ZIP パッケージのダウンロード**:  
-   [GitHub Releases](https://github.com/Zaki-XL/ChromecastRemoteControl/releases) から最新バージョンの `GoogleTVRemote_v1.1.0_win64.zip` をダウンロードします。
+   [GitHub Releases](https://github.com/Zaki-XL/ChromecastRemoteControl/releases) から最新バージョンの `GoogleTVRemote_v1.1.1_win64.zip` をダウンロードします。
 2. **展開（解凍）**:  
    ダウンロードした ZIP ファイルを任意のフォルダー（例: ドキュメントフォルダーやデスクトップなど）に展開します。
 3. **起動**:  

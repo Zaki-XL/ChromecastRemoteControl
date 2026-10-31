@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_data_files
 
-datas = []
+datas = [('assets', 'assets'), ('bin/client', 'bin/client')]
 datas += collect_data_files('flet')
 
 
@@ -39,4 +39,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version='version_info.txt',
+    icon=['assets\\icon.ico'],
 )

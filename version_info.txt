@@ -1,0 +1,49 @@
+# UTF-8
+#
+# Windows PE Version Information Resource Definition for PyInstaller
+#
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(1, 1, 1, 0),
+    prodvers=(1, 1, 1, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo(
+      [
+        StringTable(
+          '040904B0',
+          [
+            StringStruct('CompanyName', 'Zaki-XL'),
+            StringStruct('FileDescription', 'Google TV Remote'),
+            StringStruct('FileVersion', '1.1.1.0'),
+            StringStruct('InternalName', 'GoogleTVRemote'),
+            StringStruct('LegalCopyright', 'Copyright (c) 2026 Zaki-XL. MIT License.'),
+            StringStruct('OriginalFilename', 'GoogleTVRemote.exe'),
+            StringStruct('ProductName', 'Google TV Remote'),
+            StringStruct('ProductVersion', '1.1.1.0')
+          ]
+        ),
+        StringTable(
+          '041104B0',
+          [
+            StringStruct('CompanyName', 'Zaki-XL'),
+            StringStruct('FileDescription', 'Google TV Remote'),
+            StringStruct('FileVersion', '1.1.1.0'),
+            StringStruct('InternalName', 'GoogleTVRemote'),
+            StringStruct('LegalCopyright', 'Copyright (c) 2026 Zaki-XL. MIT License.'),
+            StringStruct('OriginalFilename', 'GoogleTVRemote.exe'),
+            StringStruct('ProductName', 'Google TV Remote'),
+            StringStruct('ProductVersion', '1.1.1.0')
+          ]
+        )
+      ]
+    ),
+    VarFileInfo([VarStruct('Translation', [1033, 1200, 1041, 1200])])
+  ]
+)

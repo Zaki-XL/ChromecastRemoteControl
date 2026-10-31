@@ -15,6 +15,7 @@
 !/build_app.ps1
 !/GoogleTVRemote.spec
 !/config.example.ini
+!/version_info.txt
 !/scr.png
 
 # Python ソースコード

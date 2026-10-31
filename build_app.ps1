@@ -37,6 +37,12 @@ if (Test-Path "GoogleTVRemote.spec") {
     Remove-Item -Force "GoogleTVRemote.spec"
 }
 
+# Ensure custom branded Flet client exists with icon and Google TV Remote description
+if (-not (Test-Path "bin\client\flet.exe")) {
+    Write-Host "Preparing custom branded Flet client in bin\client..." -ForegroundColor Cyan
+    python scratch/prepare_custom_client.py
+}
+
 # --- ガードレール 1: ビルド前自動テスト (構文・属性解決・実コンポーネント検証) ---
 Write-Host "`n[TEST GATE] Running Pre-Build Automated Tests..." -ForegroundColor Yellow
 python tests/run_tests.py --pre-build
@@ -50,9 +56,9 @@ if ($LASTEXITCODE -ne 0) {
 # Run PyInstaller build
 Write-Host "`nStarting PyInstaller single-file packaging..." -ForegroundColor Cyan
 if ($runCmd -eq "pyinstaller") {
-    pyinstaller --clean --onefile --noconsole --paths="src" --collect-data flet --name="GoogleTVRemote" main.py
+    pyinstaller --clean --onefile --noconsole --paths="src" --collect-data flet --add-data "assets;assets" --add-data "bin/client;bin/client" --version-file="version_info.txt" --icon="assets/icon.ico" --name="GoogleTVRemote" main.py
 } else {
-    python -m PyInstaller --clean --onefile --noconsole --paths="src" --collect-data flet --name="GoogleTVRemote" main.py
+    python -m PyInstaller --clean --onefile --noconsole --paths="src" --collect-data flet --add-data "assets;assets" --add-data "bin/client;bin/client" --version-file="version_info.txt" --icon="assets/icon.ico" --name="GoogleTVRemote" main.py
 }
 
 $buildExitCode = $LASTEXITCODE

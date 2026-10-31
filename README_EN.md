@@ -103,7 +103,7 @@ Legacy Chromecast models (1st to 3rd generation, Chromecast Ultra) and modern Go
 Pre-built standalone Windows executables (EXE) are provided so you can run the app without installing Python.
 
 1. **Download ZIP**:  
-   Download the latest `GoogleTVRemote_v1.1.0_win64.zip` from [GitHub Releases](https://github.com/Zaki-XL/ChromecastRemoteControl/releases).
+   Download the latest `GoogleTVRemote_v1.1.1_win64.zip` from [GitHub Releases](https://github.com/Zaki-XL/ChromecastRemoteControl/releases).
 2. **Extract**:  
    Extract (unzip) the archive to any folder of your choice (e.g., in Documents or Desktop).
 3. **Launch**:  

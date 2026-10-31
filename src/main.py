@@ -18,6 +18,20 @@ if _project_root not in sys.path:
 
 import flet as ft
 
+def get_asset_path(filename: str) -> str:
+    """開発環境、PyInstaller展開環境、ポータブル配布環境からアセットの絶対パスを解決します。"""
+    if getattr(sys, 'frozen', False):
+        mei_path = getattr(sys, '_MEIPASS', '')
+        if mei_path:
+            p = os.path.join(mei_path, 'assets', filename)
+            if os.path.exists(p):
+                return p
+        exe_dir = os.path.dirname(sys.executable)
+        p = os.path.join(exe_dir, 'assets', filename)
+        if os.path.exists(p):
+            return p
+    return os.path.join(_project_root, 'assets', filename)
+
 try:
     from src.config_manager import ConfigManager
     from src.device_tracker import AndroidTVTracker
@@ -217,7 +231,10 @@ async def main(page: ft.Page) -> None:
     loop = asyncio.get_running_loop()
 
     # ページの初期設定（INIから読み込み）
-    page.title = "Android TV & Cast Remote"
+    page.title = "Google TV Remote"
+    icon_file = get_asset_path("icon.ico")
+    if os.path.exists(icon_file):
+        page.window.icon = icon_file
     page.window.width = config.window_width
     page.window.height = config.window_height
     page.window.resizable = True
@@ -1756,8 +1773,32 @@ async def main(page: ft.Page) -> None:
 
 def run_app() -> None:
     """アプリケーションを起動します。"""
+    # Windows タスクバーで独立したアプリアイコン・グループとして認識させる
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ZakiXL.GoogleTVRemote.1.1.1")
+    except Exception:
+        pass
+
+    # カスタム Flet クライアント（アイコン・説明をパッチした専用 flet.exe）の優先設定
+    client_dir = os.path.join(_project_root, "bin", "client")
+    if getattr(sys, 'frozen', False):
+        mei_path = getattr(sys, '_MEIPASS', '')
+        if mei_path:
+            p = os.path.join(mei_path, "bin", "client")
+            if os.path.exists(p):
+                client_dir = p
+        exe_dir = os.path.dirname(sys.executable)
+        p = os.path.join(exe_dir, "bin", "client")
+        if os.path.exists(p):
+            client_dir = p
+
+    if os.path.exists(client_dir):
+        os.environ["FLET_VIEW_PATH"] = client_dir
+
     prevent_multiple_instances(config.lock_port)
-    ft.app(target=main)
+    assets_path = os.path.dirname(get_asset_path("icon.ico"))
+    ft.app(target=main, assets_dir=assets_path if os.path.exists(assets_path) else "assets")
 
 if __name__ == "__main__":
     run_app()
